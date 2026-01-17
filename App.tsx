@@ -5,6 +5,7 @@ import { supabase } from "./services/supabase";
 
 
 
+
 interface BallState {
   id: number;
   x: number;
@@ -49,9 +50,9 @@ const TEST_EMAIL = 'test@user.com';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userEmail, setUserEmail] = useState('');
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
+  const isLoggedIn = !!sessionEmail;
+  const [userEmail, setUserEmail] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   const [showWinReveal, setShowWinReveal] = useState(false);
   
@@ -88,7 +89,11 @@ const App: React.FC = () => {
   const [totalRollover, setTotalRollover] = useState(0);
 
   // DYNAMIC CALCULATIONS
-  const isAdmin = useMemo(() => userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase(), [userEmail]);
+const isAdmin = useMemo(() => {
+  if (!sessionEmail) return false;
+  return sessionEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+}, [sessionEmail]);
+
   const paidCount = useMemo(() => Object.values(managedBallData).filter(b => b.status === 'paid' || b.status === 'lifetime').length, [managedBallData]);
   const currentPot = useMemo(() => totalRollover + (paidCount * 2), [totalRollover, paidCount]);
   const totalRaised = useMemo(() => pastResults.reduce((acc, curr) => acc + curr.charityAmount, 0), [pastResults]);
@@ -111,25 +116,61 @@ const App: React.FC = () => {
   const latestWin = pastResults.length > 0 ? pastResults[0] : null;
 
   // HANDLERS
-  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const emailInput = formData.get('email') as string;
-    // Handle browser autocomplete or empty state correctly
-    const finalEmail = emailInput || (isRegistering ? '' : ADMIN_EMAIL);
-    setUserEmail(finalEmail);
-    setIsLoggedIn(true);
-    if (latestWin) checkReveal();
-  };
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
 
-  const handleRegister = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const emailInput = formData.get('email') as string;
-    setUserEmail(emailInput);
-    setIsLoggedIn(true);
+  const formData = new FormData(e.currentTarget);
+  const email = String(formData.get("email") ?? "");
+  const password = String(formData.get("password") ?? "");
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  const signedInEmail = data.user?.email ?? email;
+  setUserEmail(signedInEmail);
+
+  if (latestWin) checkReveal();
+};
+
+
+  const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+
+  const formData = new FormData(e.currentTarget);
+  const email = String(formData.get("email") ?? "");
+  const password = String(formData.get("password") ?? "");
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+  });
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  // If email confirmations are ON, session may be null until confirmed.
+  const signedUpEmail = data.user?.email ?? email;
+  setUserEmail(signedUpEmail);
+
+  // Try to immediately log in if a session exists (confirmations OFF).
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData.session) {
     sendPush("Welcome", "Your account has been successfully created.", "admin", "reminder");
-  };
+  } else {
+    alert("Account created. Please check your email to confirm, then log in.");
+    setIsRegistering(false);
+  }
+};
+
 
   const checkReveal = () => {
     const now = new Date();
@@ -395,7 +436,10 @@ useEffect(() => {
 
       {isLoggedIn ? (
         <>
+        
+
           <header className="relative z-10 pt-10 px-6 text-center">
+
              <div className="flex items-center justify-between max-w-6xl mx-auto w-full absolute top-6 px-6">
                 <button onClick={() => { setShowInbox(true); setNotifications(prev => prev.map(n => ({...n, read: true}))); }} className={`relative p-3 rounded-full border transition-all ${hasUnread ? 'bg-pink-500 border-pink-500 text-black shadow-lg animate-pulse' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}>
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -403,7 +447,12 @@ useEffect(() => {
                 </button>
                 <div className="flex items-center gap-4">
                   <span className="text-[9px] font-black uppercase text-white/20 truncate max-w-[150px] hidden md:block">{userEmail}</span>
-                  <button onClick={() => setIsLoggedIn(false)} className="px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/40 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest">Sign Out</button>
+                  <button onClick={async () => {
+  await supabase.auth.signOut();
+  setIsLoggedIn(false);
+  setUserEmail("");
+}}
+ className="px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/40 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest">Sign Out</button>
                 </div>
              </div>
              <div className="w-12 h-12 rounded-full bg-pink-500 mx-auto flex items-center justify-center text-black font-black text-[10px] mb-4 shadow-[0_0_20px_rgba(236,72,153,0.3)] mt-12 animate-pulse">DWA</div>
@@ -414,6 +463,88 @@ useEffect(() => {
 ) : (
   <p className="text-white/40 text-[10px] font-bold mt-2">Not signed in</p>
 )}
+{sessionEmail ? (
+  <button
+    onClick={async () => {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        alert("Notifications permission not granted.");
+        return;
+      }
+
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        // VAPID key comes next step
+applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8P0Fx_pXVvyEhahuueCMkM0gThg4aeM",
+      });
+
+      console.log("Push subscription:", JSON.stringify(sub));
+            const {
+        data: { user },
+        error: userErr,
+      } = await supabase.auth.getUser();
+
+      if (userErr || !user) {
+        alert("Not logged in.");
+        return;
+      }
+
+      const json = sub.toJSON();
+      const endpoint = json.endpoint;
+      const p256dh = json.keys?.p256dh;
+      const auth = json.keys?.auth;
+
+      if (!endpoint || !p256dh || !auth) {
+        alert("Subscription missing required fields.");
+        return;
+      }
+
+      const { error: upsertErr } = await supabase.from("push_subscriptions").upsert(
+        {
+  user_id: user.id,
+  endpoint,
+  p256dh,
+  auth,
+  created_at: new Date().toISOString(),
+},
+        { onConflict: "endpoint" }
+      );
+
+      if (upsertErr) {
+        alert(upsertErr.message);
+        return;
+      }
+
+      alert("Subscribed and saved!");
+
+    }}
+    className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
+  >
+    Enable Notifications
+  </button>
+) : null}
+
+{sessionEmail ? (
+  <button
+    onClick={async () => {
+      const { data } = await supabase.auth.getUser();
+      const id = data.user?.id;
+
+      if (!id) {
+        alert("No user (not logged in)");
+        return;
+      }
+
+      await navigator.clipboard.writeText(id);
+      alert("Copied user id: " + id);
+    }}
+    className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
+  >
+    Copy User ID
+  </button>
+) : null}
+
 
           </header>
 
@@ -557,6 +688,26 @@ useEffect(() => {
                               ))}</div></div>
                           <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Payload</label><textarea value={blastMessage} onChange={(e) => setBlastMessage(e.target.value)} rows={5} placeholder="Message text..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm outline-none focus:border-pink-500 transition-all resize-none" /></div>
                           <button disabled={isTransmitting || !blastMessage} onClick={() => sendPush("Announcement", blastMessage, blastTarget, 'blast')} className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10">{isTransmitting ? 'Transmitting...' : 'Send Broadcast'}</button>
+                         <button
+  onClick={async () => {
+    const res = await fetch("/.netlify/functions/push-broadcast", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Test Push", body: "Hello from Netlify Function ✅" }),
+    });
+
+    const text = await res.text();
+    if (!res.ok) {
+      alert(text);
+      return;
+    }
+    alert(text);
+  }}
+  className="w-full py-4 bg-white/10 text-white font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-white/20 transition-all"
+>
+  Send Test Push (Real)
+</button>
+
                         </div>
                       </div>
                       <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-[2.5rem] p-10 text-black shadow-2xl">
@@ -624,17 +775,11 @@ useEffect(() => {
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">Access Key</label>
-                  <input name="password" required type="password" defaultValue="••••••••" className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all" />
+                  <input name="password" required type="password" placeholder="••••••••" className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all" />
                 </div>
                 <div className="text-center space-y-2">
                   <button type="submit" className="w-full py-5 bg-white text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-500 hover:text-white transition-all shadow-xl active:scale-95">Enter Platform</button>
-                  <div className="pt-2">
-                    <p className="text-[9px] font-bold text-white/10 uppercase tracking-widest mb-2">Permission Testing</p>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => { setUserEmail(ADMIN_EMAIL); setIsLoggedIn(true); }} className="flex-1 py-2 bg-white/5 border border-white/10 rounded-xl text-[8px] font-black uppercase tracking-widest text-white/30 hover:text-pink-500 transition-all">Carl (Admin)</button>
-                      <button type="button" onClick={() => { setUserEmail(TEST_EMAIL); setIsLoggedIn(true); }} className="flex-1 py-2 bg-white/5 border border-white/10 rounded-xl text-[8px] font-black uppercase tracking-widest text-white/30 hover:text-pink-500 transition-all">Test User</button>
-                    </div>
-                  </div>
+                  
                 </div>
                 <button type="button" onClick={() => setIsRegistering(true)} className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all">Don't have an account? Register</button>
               </form>
