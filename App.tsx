@@ -1,6 +1,9 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LotteryBall } from './components/LotteryBall';
+import { supabase } from "./services/supabase";
+
+
 
 interface BallState {
   id: number;
@@ -238,6 +241,19 @@ const App: React.FC = () => {
     requestRef.current = requestAnimationFrame(update);
     return () => cancelAnimationFrame(requestRef.current!);
   }, []);
+useEffect(() => {
+  const testSupabase = async () => {
+    const { data, error } = await supabase
+      .from("bonus_ball_data")
+      .select("id")
+      .limit(1);
+
+    console.log("✅ Supabase test data:", data);
+    console.log("❌ Supabase test error:", error);
+  };
+
+  testSupabase();
+}, []);
 
   const sendPush = (title: string, body: string, target: string, type: 'blast' | 'reminder' | 'win') => {
     setIsTransmitting(true);
