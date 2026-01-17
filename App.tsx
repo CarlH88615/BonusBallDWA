@@ -51,6 +51,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userEmail, setUserEmail] = useState('');
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
   const [showWinReveal, setShowWinReveal] = useState(false);
   
@@ -241,6 +242,17 @@ const App: React.FC = () => {
     requestRef.current = requestAnimationFrame(update);
     return () => cancelAnimationFrame(requestRef.current!);
   }, []);
+useEffect(() => {
+  supabase.auth.getSession().then(({ data }) => {
+    setSessionEmail(data.session?.user.email ?? null);
+  });
+
+  const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    setSessionEmail(session?.user.email ?? null);
+  });
+
+  return () => sub.subscription.unsubscribe();
+}, []);
 
 
   const sendPush = (title: string, body: string, target: string, type: 'blast' | 'reminder' | 'win') => {
@@ -397,6 +409,12 @@ const App: React.FC = () => {
              <div className="w-12 h-12 rounded-full bg-pink-500 mx-auto flex items-center justify-center text-black font-black text-[10px] mb-4 shadow-[0_0_20px_rgba(236,72,153,0.3)] mt-12 animate-pulse">DWA</div>
              <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">{activeTab}</h2>
              <p className="text-pink-400 text-[9px] font-black uppercase tracking-[0.3em] mt-2">In Memory of Emmie-Rose</p>
+             {sessionEmail ? (
+  <p className="text-white/40 text-[10px] font-bold mt-2">Signed in as {sessionEmail}</p>
+) : (
+  <p className="text-white/40 text-[10px] font-bold mt-2">Not signed in</p>
+)}
+
           </header>
 
           <main className="relative z-10 flex-1 overflow-y-auto p-6 pb-40">
