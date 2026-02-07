@@ -82,6 +82,7 @@ const App: React.FC = () => {
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
+  const [loginEmail, setLoginEmail] = useState("");
   const requestRef = useRef<number>(null);
 
   const [managedBallData, setManagedBallData] = useState<Record<number, BallOwnerDetails>>({});
@@ -785,29 +786,27 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
                 </div>
                 <div className="text-center space-y-2">
                   <button type="submit" className="w-full py-5 bg-white text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-500 hover:text-white transition-all shadow-xl active:scale-95">Enter Platform</button>
-                  <button
-  type="button"
-  onClick={async () => {
-    if (!userEmail) {
-      alert("Enter your email address first");
-      return;
-    }
+                  onClick={async (e) => {
+  const form = e.currentTarget.closest("form");
+  const emailInput = form?.querySelector<HTMLInputElement>('input[name="email"]');
+  const email = emailInput?.value;
 
-    const { error } = await supabase.auth.resetPasswordForEmail(userEmail, {
-      redirectTo: window.location.origin,
-    });
+  if (!email) {
+    alert("Enter your email address first");
+    return;
+  }
 
-    if (error) {
-      alert(error.message);
-      return;
-    }
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin,
+  });
 
-    alert("Password recovery email sent. Check your inbox.");
-  }}
-  className="w-full text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-all mt-3"
->
-  Forgot password?
-</button>
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  alert("Password recovery email sent. Check your inbox.");
+}}
 
                 </div>
                 <button type="button" onClick={() => setIsRegistering(true)} className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all">Don't have an account? Register</button>
