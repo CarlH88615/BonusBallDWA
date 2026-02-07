@@ -284,16 +284,22 @@ const isAdmin = useMemo(() => {
     return () => cancelAnimationFrame(requestRef.current!);
   }, []);
 useEffect(() => {
-  supabase.auth.getSession().then(({ data }) => {
+  // This completes password reset / magic link flows
+  supabase.auth.getSession().then(({ data, error }) => {
+    if (error) {
+      console.error("Auth session error:", error.message);
+    }
     setSessionEmail(data.session?.user.email ?? null);
   });
 
-  const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+  const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+    console.log("Auth event:", event);
     setSessionEmail(session?.user.email ?? null);
   });
 
   return () => sub.subscription.unsubscribe();
 }, []);
+
 
 
   const sendPush = (title: string, body: string, target: string, type: 'blast' | 'reminder' | 'win') => {
