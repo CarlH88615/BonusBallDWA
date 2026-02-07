@@ -766,14 +766,79 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
             <p className="text-[10px] font-black uppercase tracking-[0.5em] text-white/20 mt-4">In Memory of Emmie-Rose</p>
           </div>
           <div className="w-full max-w-md bg-white/[0.03] backdrop-blur-3xl border border-white/10 p-10 rounded-[3rem] shadow-2xl relative z-10 animate-in fade-in slide-in-from-bottom-10 duration-1000">
-            {isRegistering ? (
-              <form onSubmit={handleRegister} className="space-y-6">
-                <div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">Full Name</label><input name="name" required type="text" className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all" /></div>
-                <div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">Email Address</label><input name="email" required type="email" className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all" /></div>
-                <div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">Secure Access Key</label><input name="password" required type="password" placeholder="••••••••" className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all" /></div>
-                <button type="submit" className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-400 transition-all shadow-xl active:scale-95">Create Account</button>
-                <button type="button" onClick={() => setIsRegistering(false)} className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all">Already have an account? Sign In</button>
-              </form>
+            <form onSubmit={handleLogin} className="space-y-6">
+  <div className="space-y-2">
+    <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
+      Secure Email
+    </label>
+    <input
+      name="email"
+      type="email"
+      required
+      defaultValue={ADMIN_EMAIL}
+      className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
+    />
+  </div>
+
+  <div className="space-y-2">
+    <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
+      Access Key
+    </label>
+    <input
+      name="password"
+      type="password"
+      required
+      placeholder="••••••••"
+      className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
+    />
+  </div>
+
+  <div className="text-center space-y-2">
+    <button
+      type="submit"
+      className="w-full py-5 bg-white text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-500 hover:text-white transition-all shadow-xl active:scale-95"
+    >
+      Enter Platform
+    </button>
+
+    <button
+      type="button"
+      onClick={async (e) => {
+        const form = e.currentTarget.closest("form");
+        const emailInput = form?.querySelector<HTMLInputElement>('input[name="email"]');
+        const email = emailInput?.value;
+
+        if (!email) {
+          alert("Enter your email address first");
+          return;
+        }
+
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin,
+        });
+
+        if (error) {
+          alert(error.message);
+          return;
+        }
+
+        alert("Password recovery email sent. Check your inbox.");
+      }}
+      className="w-full text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-all mt-3"
+    >
+      Forgot password?
+    </button>
+  </div>
+
+  <button
+    type="button"
+    onClick={() => setIsRegistering(true)}
+    className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all"
+  >
+    Don't have an account? Register
+  </button>
+</form>
+
             ) : (
               <form onSubmit={handleLogin} className="space-y-6">
                 <div className="space-y-2">
