@@ -422,7 +422,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     setSelectedBallNum(null);
   };
 
-  const commitPayment = () => {
+  const commitPayment = async () => {
     if (!isAdmin) return;
     const num = adminAction?.ballNum;
     const weeks = parseInt(paymentWeeks);
@@ -446,6 +446,36 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
         }
       };
     });
+
+    const ballIdx = balls.findIndex(b => b.number === num);
+    if (ballIdx !== -1) {
+      const today = new Date();
+      const saturday = new Date(today);
+      saturday.setHours(0, 0, 0, 0);
+      saturday.setDate(today.getDate() - ((today.getDay() + 1) % 7));
+
+      const existingPaidUntil = balls[ballIdx].paidUntil ? new Date(balls[ballIdx].paidUntil) : null;
+      const startDate = existingPaidUntil && existingPaidUntil > saturday ? existingPaidUntil : saturday;
+      const newPaidUntilDate = new Date(startDate);
+      newPaidUntilDate.setDate(newPaidUntilDate.getDate() + (weeks * 7));
+      const formattedPaidUntil = newPaidUntilDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', '');
+
+      const updatedBalls = [...balls];
+      updatedBalls[ballIdx] = { ...balls[ballIdx], paidUntil: formattedPaidUntil };
+
+      console.log(`💾 Persisting payment for ball ${num}`);
+      const { error: updateErr } = await supabase
+        .from("bonus_ball_data")
+        .update({ state: { balls: updatedBalls } })
+        .select()
+        .single();
+      if (updateErr) {
+        console.error("❌ Failed to persist payment", updateErr);
+      } else {
+        setBalls(updatedBalls);
+        console.log("✅ Payment persisted");
+      }
+    }
 
     sendPush("Payment Logged", `Received payment for Ball #${num} (${weeks} week${weeks > 1 ? 's' : ''})`, "admin", "reminder");
     setAdminAction(null);
