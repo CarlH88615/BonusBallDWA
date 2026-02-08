@@ -684,12 +684,13 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   </div>
                   <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-[3rem] p-10 md:p-14 shadow-2xl">
                     <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-6">
-                      {Array.from({ length: 59 }).map((_, i) => {
-                        const num = i + 1; const owner = managedBallData[num];
+                      {balls.map((ball) => {
+                        const num = ball.number;
+                        const ownerName = ball.owner;
                         return (
                           <div key={num} onClick={() => setSelectedBallNum(num)} className="group cursor-pointer transition-all flex flex-col items-center gap-2">
-                            <LotteryBall number={num} className="w-full group-hover:scale-110 transition-transform" opacity={owner ? 1 : 0.1} />
-                            <p className={`text-[8px] font-black uppercase truncate w-full text-center mt-1 transition-colors ${owner?.status === 'overdue' ? 'text-yellow-500' : owner ? 'text-white/40' : 'text-white/10'}`}>{owner ? owner.name : 'Open'}</p>
+                            <LotteryBall number={num} className="w-full group-hover:scale-110 transition-transform" opacity={ownerName ? 1 : 0.1} />
+                            <p className={`text-[8px] font-black uppercase truncate w-full text-center mt-1 transition-colors ${ownerName ? 'text-white/40' : 'text-white/10'}`}>{ownerName ?? 'Open'}</p>
                           </div>
                         );
                       })}
@@ -730,23 +731,27 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <input type="text" placeholder="Search..." className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-pink-500" value={adminSearchTerm} onChange={(e) => setAdminSearchTerm(e.target.value)} />
                         </div>
                         <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                          {Array.from({ length: 59 }).map((_, i) => {
-                            const num = i + 1;
-                            const data = managedBallData[num];
-                            if (adminSearchTerm && !num.toString().includes(adminSearchTerm) && !(data && data.name.toLowerCase().includes(adminSearchTerm.toLowerCase()))) return null;
+                          {balls.map((ball) => {
+                            const num = ball.number;
+                            const ownerName = ball.owner;
+                            const matchesSearch =
+                              !adminSearchTerm ||
+                              num.toString().includes(adminSearchTerm) ||
+                              (ownerName && ownerName.toLowerCase().includes(adminSearchTerm.toLowerCase()));
+                            if (!matchesSearch) return null;
                             return (
                               <div key={num} className="bg-white/[0.02] border border-white/5 p-4 rounded-2xl flex items-center justify-between hover:bg-white/[0.05] transition-all">
                                 <div className="flex items-center gap-4">
-                                  <LotteryBall number={num} className="w-10 h-10" opacity={data ? 1 : 0.2} />
+                                  <LotteryBall number={num} className="w-10 h-10" opacity={ownerName ? 1 : 0.2} />
                                   <div>
-                                    <p className="text-sm font-black text-white leading-none">{data ? data.name : `Vacant Ball #${num}`}</p>
-                                    <p className="text-[9px] font-bold uppercase mt-1 text-white/30">{data ? (data.status === 'lifetime' ? 'Lifetime' : `Due: ${data.nextDue}`) : 'Available'}</p>
+                                    <p className="text-sm font-black text-white leading-none">{ownerName ?? `Vacant Ball #${num}`}</p>
+                                    <p className="text-[9px] font-bold uppercase mt-1 text-white/30">{ownerName ? `Due: ${ball.paidUntil ?? 'N/A'}` : 'Available'}</p>
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                  {data ? (
+                                  {ownerName ? (
                                     <>
-                                      <button onClick={() => handleUpdatePaymentInitiate(num)} className={`px-3 py-1.5 text-[9px] font-black uppercase rounded-lg bg-pink-500 text-black hover:bg-pink-400 transition-all ${data.status === 'lifetime' ? 'hidden' : ''}`}>Record Payment</button>
+                                      <button onClick={() => handleUpdatePaymentInitiate(num)} className="px-3 py-1.5 text-[9px] font-black uppercase rounded-lg bg-pink-500 text-black hover:bg-pink-400 transition-all">Record Payment</button>
                                       <button onClick={() => handleRemoveBall(num)} className="p-2 bg-white/5 text-white/30 hover:text-white rounded-lg"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
                                     </>
                                   ) : (
