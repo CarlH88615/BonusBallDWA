@@ -770,6 +770,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           {balls.map((ball) => {
                             const num = ball.number;
                             const ownerName = ball.owner;
+                            const nextDueDate = ball.paidUntil
+                              ? new Date(new Date(ball.paidUntil).getTime() + 7 * 24 * 60 * 60 * 1000)
+                              : null;
+                            const nextDueLabel = nextDueDate
+                              ? nextDueDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', '')
+                              : 'N/A';
                             const matchesSearch =
                               !adminSearchTerm ||
                               num.toString().includes(adminSearchTerm) ||
@@ -781,7 +787,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                   <LotteryBall number={num} className="w-10 h-10" opacity={ownerName ? 1 : 0.2} />
                                   <div>
                                     <p className="text-sm font-black text-white leading-none">{ownerName ?? `Vacant Ball #${num}`}</p>
-                                    <p className="text-[9px] font-bold uppercase mt-1 text-white/30">{ownerName ? `Due: ${ball.paidUntil ?? 'N/A'}` : 'Available'}</p>
+                                    <p className="text-[9px] font-bold uppercase mt-1 text-white/30">{ownerName ? `Due: ${nextDueLabel}` : 'Available'}</p>
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-3">
