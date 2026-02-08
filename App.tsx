@@ -86,6 +86,7 @@ const App: React.FC = () => {
   const [showInbox, setShowInbox] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
   const [balls, setBalls] = useState<any[]>([]);
+  const [bonusBallRowId, setBonusBallRowId] = useState<string | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -360,7 +361,7 @@ const loadBallsFromDb = async () => {
 
   const { data, error } = await supabase
     .from("bonus_ball_data")
-    .select("state")
+    .select("id, state")
     .single();
 
   if (error) {
@@ -374,6 +375,7 @@ const loadBallsFromDb = async () => {
   }
 
   console.log("✅ Loaded balls:", data.state.balls);
+  setBonusBallRowId(data.id ?? null);
   setBalls(data.state.balls);
 };
 
@@ -449,6 +451,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
     const ballIdx = balls.findIndex(b => b.number === num);
     if (ballIdx !== -1) {
+      if (!bonusBallRowId) return;
       const today = new Date();
       const saturday = new Date(today);
       saturday.setHours(0, 0, 0, 0);
@@ -463,10 +466,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       const updatedBalls = [...balls];
       updatedBalls[ballIdx] = { ...balls[ballIdx], paidUntil: formattedPaidUntil };
 
+      console.log(`💾 Persisting payment for bonus_ball_data row ${bonusBallRowId}`);
       console.log(`💾 Persisting payment for ball ${num}`);
       const { error: updateErr } = await supabase
         .from("bonus_ball_data")
         .update({ state: { balls: updatedBalls } })
+        .eq("id", bonusBallRowId)
         .select()
         .single();
       if (updateErr) {
