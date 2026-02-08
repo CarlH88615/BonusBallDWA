@@ -85,6 +85,7 @@ const App: React.FC = () => {
   const [blastTarget, setBlastTarget] = useState<'all' | 'unpaid' | 'specific'>('all');
   const [showInbox, setShowInbox] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
+  const [balls, setBalls] = useState<any[]>([]);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -306,6 +307,9 @@ useEffect(() => {
     if (event === "PASSWORD_RECOVERY") {
       setAuthMode("reset");
     }
+    if (event === "INITIAL_SESSION" && session) {
+      loadBallsFromDb();
+    }
 
     const recoveryFlag = Boolean((session?.user as any)?.recovery_sent_at);
     setIsRecoveryMode(recoveryFlag);
@@ -349,6 +353,28 @@ const handleResetPassword = async (e: React.FormEvent) => {
 
   alert("Password updated. You can now log in.");
   setAuthMode("login");
+};
+
+const loadBallsFromDb = async () => {
+  console.log("🔥 Loading bonus_ball_data from Supabase");
+
+  const { data, error } = await supabase
+    .from("bonus_ball_data")
+    .select("state")
+    .single();
+
+  if (error) {
+    console.error("❌ Failed to load bonus_ball_data", error);
+    return;
+  }
+
+  if (!data?.state?.balls) {
+    console.warn("⚠️ bonus_ball_data has no balls array");
+    return;
+  }
+
+  console.log("✅ Loaded balls:", data.state.balls);
+  setBalls(data.state.balls);
 };
 
 // Recovery modal password update (blocking)
