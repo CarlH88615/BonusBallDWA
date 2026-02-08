@@ -53,7 +53,8 @@ const App: React.FC = () => {
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const isLoggedIn = !!sessionEmail;
   const [userEmail, setUserEmail] = useState('');
-  const [isRegistering, setIsRegistering] = useState(false);
+type AuthMode = "login" | "register" | "forgot" | "reset";
+const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [showWinReveal, setShowWinReveal] = useState(false);
   
   // Modals / Admin State
@@ -295,12 +296,51 @@ useEffect(() => {
 
   const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
     console.log("Auth event:", event);
+    if (event === "PASSWORD_RECOVERY") {
+  setAuthMode("reset");
+}
+
     setSessionEmail(session?.user.email ?? null);
   });
 
   return () => sub.subscription.unsubscribe();
 }, []);
 
+const handleForgotPassword = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  const form = e.target as HTMLFormElement;
+  const email = (form.elements.namedItem("email") as HTMLInputElement).value;
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin,
+  });
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  alert("Password reset email sent.");
+  setAuthMode("login");
+};
+
+const handleResetPassword = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  const form = e.target as HTMLFormElement;
+  const password = (form.elements.namedItem("password") as HTMLInputElement).value;
+
+  const { error } = await supabase.auth.updateUser({ password });
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  alert("Password updated. You can now log in.");
+  setAuthMode("login");
+};
 
 
   const sendPush = (title: string, body: string, target: string, type: 'blast' | 'reminder' | 'win') => {
@@ -753,220 +793,183 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
           </nav>
         </>
       ) : (
-        /* Login / Register */
-        <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full pointer-events-none opacity-20 overflow-hidden">
-            {smallBalls.map(ball => (
-              <div key={ball.id} className="absolute" style={{ left: ball.x, top: ball.y, width: ball.radius*2, height: ball.radius*2, transform: 'translate(-50%, -50%)' }}><LotteryBall number={ball.num} hideShadow={true} className="w-full h-full" opacity={0.3} blur="1px" /></div>
-            ))}
-          </div>
-          <div className="relative z-10 text-center mb-12">
-            <div className="w-16 h-16 rounded-full bg-pink-500 mx-auto flex items-center justify-center text-black font-black text-sm mb-6 shadow-2xl animate-bounce">DWA</div>
-            <h1 className="text-7xl font-black text-white tracking-tighter uppercase leading-none">Bonus<br/><span className="text-pink-500">Ball</span></h1>
-            <p className="text-[10px] font-black uppercase tracking-[0.5em] text-white/20 mt-4">In Memory of Emmie-Rose</p>
-          </div>
-         {isRegistering ? (
-  <div className="w-full max-w-md bg-white/[0.03] backdrop-blur-3xl border border-white/10 p-10 rounded-[3rem] shadow-2xl relative z-10 animate-in fade-in slide-in-from-bottom-10 duration-1000">
-    <form onSubmit={handleRegister} className="space-y-6">
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Email
-        </label>
-        <input
-          name="email"
-          required
-          type="email"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
+  /* Login / Register */
+  <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6">
+    {/* Background balls */}
+    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full pointer-events-none opacity-20 overflow-hidden">
+      {smallBalls.map(ball => (
+        <div
+          key={ball.id}
+          className="absolute"
+          style={{
+            left: ball.x,
+            top: ball.y,
+            width: ball.radius * 2,
+            height: ball.radius * 2,
+            transform: "translate(-50%, -50%)",
+          }}
+        >
+          <LotteryBall
+            number={ball.num}
+            hideShadow
+            className="w-full h-full"
+            opacity={0.3}
+            blur="1px"
+          />
+        </div>
+      ))}
+    </div>
+
+    {/* Logo / Title */}
+    <div className="relative z-10 text-center mb-12">
+      <div className="w-16 h-16 rounded-full bg-pink-500 mx-auto flex items-center justify-center text-black font-black text-sm mb-6 shadow-2xl animate-bounce">
+        DWA
       </div>
+      <h1 className="text-7xl font-black text-white tracking-tighter uppercase leading-none">
+        Bonus
+        <br />
+        <span className="text-pink-500">Ball</span>
+      </h1>
+      <p className="text-[10px] font-black uppercase tracking-[0.5em] text-white/20 mt-4">
+        In Memory of Emmie-Rose
+      </p>
+    </div>
 
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Password
-        </label>
-        <input
-          name="password"
-          required
-          type="password"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
-      </div>
+    {/* REGISTER */}
+    {authMode === "register" && (
+      <form onSubmit={handleRegister} className="space-y-6 relative z-10">
+        <input name="email" required type="email" />
+        <input name="password" required type="password" />
+        <button type="submit">Create Account</button>
+        <button type="button" onClick={() => setAuthMode("login")}>
+          Already have an account?
+        </button>
+      </form>
+    )}
 
-      <button
-        type="submit"
-        className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-400 transition-all"
-      >
-        Create Account
-      </button>
+    {/* LOGIN */}
+    {authMode === "login" && (
+      <form onSubmit={handleLogin} className="space-y-6 relative z-10">
+        <input name="email" required type="email" />
+        <input name="password" required type="password" />
+        <button type="submit">Login</button>
+        <button type="button" onClick={() => setAuthMode("register")}>
+          Register
+        </button>
+        <button type="button" onClick={() => setAuthMode("forgot")}>
+          Forgot password?
+        </button>
+      </form>
+    )}
 
-      <button
-        type="button"
-        onClick={() => setIsRegistering(false)}
-        className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all"
-      >
-        Already have an account? Login
-      </button>
-    </form>
-  </div>
-) : (
-  <div className="w-full max-w-md bg-white/[0.03] backdrop-blur-3xl border border-white/10 p-10 rounded-[3rem] shadow-2xl relative z-10 animate-in fade-in slide-in-from-bottom-10 duration-1000">
-    <form onSubmit={handleLogin} className="space-y-6">
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Secure Email
-        </label>
-        <input
-          name="email"
-          required
-          type="email"
-          defaultValue={ADMIN_EMAIL}
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
-      </div>
+    {/* FORGOT PASSWORD */}
+    {authMode === "forgot" && (
+      <form onSubmit={handleForgotPassword} className="space-y-6 relative z-10">
+        <input name="email" required type="email" />
+        <button type="submit">Send reset email</button>
+        <button type="button" onClick={() => setAuthMode("login")}>
+          Back to login
+        </button>
+      </form>
+    )}
 
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Access Key
-        </label>
-        <input
-          name="password"
-          required
-          type="password"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
-      </div>
-
-      <button
-        type="submit"
-        className="w-full py-5 bg-white text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-500 hover:text-white transition-all"
-      >
-        Enter Platform
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setIsRegistering(true)}
-        className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all"
-      >
-        Don't have an account? Register
-      </button>
-    </form>
-  </div>
+    {/* RESET PASSWORD */}
+    {authMode === "reset" && (
+      <form onSubmit={handleResetPassword} className="space-y-6 relative z-10">
+        <input name="password" required type="password" />
+        <button type="submit">Set new password</button>
+      </form>
+    )}
+    </main>
 )}
 
-          
-        
-        </main>
-      )}
+{/* ADMIN ACTION MODAL */}
+{adminAction && isAdmin && (
+  <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 animate-in fade-in duration-300">
+    <div
+      className="absolute inset-0 bg-black/90 backdrop-blur-2xl"
+      onClick={() => setAdminAction(null)}
+    />
+    <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 shadow-2xl">
+      <button
+        onClick={() => setAdminAction(null)}
+        className="absolute top-8 right-8 text-white/20 hover:text-white"
+      >
+        ✕
+      </button>
 
-      {/* ADMIN ACTION MODAL */}
-      {adminAction && isAdmin && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 animate-in fade-in duration-300">
-           <div className="absolute inset-0 bg-black/90 backdrop-blur-2xl" onClick={() => setAdminAction(null)}></div>
-           <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 shadow-2xl">
-              <button onClick={() => setAdminAction(null)} className="absolute top-8 right-8 text-white/20 hover:text-white transition-all"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button>
-              
-              {adminAction.type === 'assign' && (
-                <div className="text-center space-y-8">
-                  <LotteryBall number={adminAction.ballNum!} className="w-32 h-32 mx-auto" />
-                  <div><h3 className="text-4xl font-black text-white uppercase tracking-tighter mb-2">Assign Ball #{adminAction.ballNum}</h3><p className="text-white/30 text-xs font-black uppercase tracking-widest">Register a new member</p></div>
-                  <div className="space-y-4">
-                    <input autoFocus value={assignmentName} onChange={(e) => setAssignmentName(e.target.value)} type="text" placeholder="Member Name..." className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500" />
-                    <button onClick={commitAssignment} className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all">Confirm Assignment</button>
-                  </div>
-                </div>
-              )}
-
-              {adminAction.type === 'payment' && (
-                <div className="text-center space-y-8">
-                  <LotteryBall number={adminAction.ballNum!} className="w-32 h-32 mx-auto" />
-                  <div><h3 className="text-4xl font-black text-white uppercase tracking-tighter mb-2">Record Payment</h3><p className="text-white/30 text-xs font-black uppercase tracking-widest">Ball #{adminAction.ballNum} - {managedBallData[adminAction.ballNum!]?.name}</p></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => { setPaymentWeeks('1'); setTimeout(commitPayment, 0); }} className="p-6 bg-white/5 border border-white/10 rounded-2xl hover:bg-pink-500 hover:text-black transition-all">
-                      <span className="block text-xl font-black">1 Week</span>
-                      <span className="text-[10px] uppercase font-bold opacity-60">£2.00</span>
-                    </button>
-                    <div className="p-6 bg-white/5 border border-white/10 rounded-2xl flex flex-col gap-2">
-                       <span className="text-[10px] uppercase font-black text-white/30">Custom</span>
-                       <div className="flex items-center gap-2">
-                         <input value={paymentWeeks} onChange={(e) => setPaymentWeeks(e.target.value)} type="number" min="1" className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-center text-white" />
-                         <button onClick={commitPayment} className="bg-pink-500 text-black p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg></button>
-                       </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {adminAction.type === 'result' && (
-                <div className="text-center space-y-8">
-                  <div className="w-20 h-20 rounded-2xl bg-pink-500/20 mx-auto flex items-center justify-center text-pink-500"><svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg></div>
-                  <div><h3 className="text-4xl font-black text-white uppercase tracking-tighter mb-2">Draw Result</h3><p className="text-white/30 text-xs font-black uppercase tracking-widest">Winning Bonus Ball</p></div>
-                  <div className="space-y-4">
-                    <input autoFocus value={resultBallNum} onChange={(e) => setResultBallNum(e.target.value)} type="number" placeholder="Winner # (1-59)" className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500" />
-                    <button onClick={commitResult} className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all">Post Result</button>
-                  </div>
-                </div>
-              )}
-           </div>
-        </div>
-      )}
-
-      {/* DETAIL MODAL */}
-      {selectedBallNum && !adminAction && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
-          <div className="absolute inset-0 bg-black/90 backdrop-blur-2xl" onClick={() => setSelectedBallNum(null)}></div>
-          <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 shadow-2xl text-center">
-            <button onClick={() => setSelectedBallNum(null)} className="absolute top-8 right-8 text-white/20 hover:text-white transition-all"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button>
-            <LotteryBall number={selectedBallNum} className="w-56 h-56 mx-auto mb-10" />
-            <h3 className="text-5xl font-black text-white uppercase tracking-tighter mb-4 leading-none">{managedBallData[selectedBallNum] ? managedBallData[selectedBallNum].name : 'Available'}</h3>
-            {managedBallData[selectedBallNum] ? (
-               <div className="space-y-4">
-                 <div className="flex justify-between p-6 bg-white/5 rounded-3xl border border-white/5 items-center">
-                   <div className="text-left"><span className="text-[10px] font-black uppercase text-white/30 tracking-widest block mb-1">Status</span><span className={`text-sm font-bold uppercase tracking-widest ${managedBallData[selectedBallNum].status === 'paid' ? 'text-green-500' : 'text-yellow-500'}`}>{managedBallData[selectedBallNum].status}</span></div>
-                   <div className="text-right"><span className="text-[10px] font-black uppercase text-white/30 tracking-widest block mb-1">Due Date</span><span className="text-sm font-bold text-white">{managedBallData[selectedBallNum].nextDue}</span></div>
-                 </div>
-                 {isAdmin && (
-                    <button onClick={() => handleUpdatePaymentInitiate(selectedBallNum)} className="w-full py-5 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all">Record Payment</button>
-                 )}
-               </div>
-            ) : (
-              <div className="space-y-6">
-                <p className="text-white/40 text-sm">Ball #{selectedBallNum} is vacant.</p>
-                {isAdmin && (
-                  <button onClick={() => setAdminAction({type: 'assign', ballNum: selectedBallNum})} className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all">Assign Member</button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* INBOX */}
-      {showInbox && (
-        <div className="fixed inset-0 z-[200] flex flex-col animate-in slide-in-from-top duration-500 bg-[#020407]">
-          <header className="p-8 flex items-center justify-between border-b border-white/10">
-            <h3 className="text-4xl font-black text-white tracking-tighter uppercase">Notifications</h3>
-            <button onClick={() => setShowInbox(false)} className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-white/40 hover:text-white transition-all"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button>
-          </header>
-          <div className="flex-1 overflow-y-auto p-8 space-y-6 max-w-4xl mx-auto w-full">
-            {notifications.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center opacity-20"><p className="font-black uppercase tracking-widest">No Alerts</p></div>
-            ) : notifications.map(n => (
-              <div key={n.id} className="bg-white/[0.03] border border-white/5 p-8 rounded-[2rem] flex gap-6 items-start">
-                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${n.type === 'blast' ? 'bg-pink-500 text-black' : 'bg-white/5 text-white/40'}`}>
-                   {n.type === 'blast' ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5.882V19.24" /></svg> : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5" /></svg>}
-                 </div>
-                 <div className="flex-1">
-                    <div className="flex justify-between items-center mb-2"><h5 className="font-black text-white uppercase tracking-tighter text-xl">{n.title}</h5><span className="text-[10px] font-bold text-white/20">{n.timestamp}</span></div>
-                    <p className="text-white/60 leading-relaxed text-sm">{n.body}</p>
-                 </div>
-              </div>
-            ))}
-          </div>
+      {adminAction.type === "assign" && (
+        <div className="space-y-6 text-center">
+          <LotteryBall number={adminAction.ballNum!} className="w-32 h-32 mx-auto" />
+          <input
+            autoFocus
+            value={assignmentName}
+            onChange={(e) => setAssignmentName(e.target.value)}
+            placeholder="Member name"
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
+          />
+          <button
+            onClick={commitAssignment}
+            className="w-full py-4 bg-pink-500 text-black font-black rounded-xl"
+          >
+            Confirm Assignment
+          </button>
         </div>
       )}
     </div>
-  );
+  </div>
+)}
+
+{/* DETAIL MODAL */}
+{selectedBallNum && !adminAction && (
+  <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+    <div
+      className="absolute inset-0 bg-black/90 backdrop-blur-2xl"
+      onClick={() => setSelectedBallNum(null)}
+    />
+    <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 text-center">
+      <button
+        onClick={() => setSelectedBallNum(null)}
+        className="absolute top-8 right-8 text-white/20 hover:text-white"
+      >
+        ✕
+      </button>
+      <LotteryBall number={selectedBallNum} className="w-56 h-56 mx-auto mb-8" />
+    </div>
+  </div>
+)}
+
+{/* INBOX */}
+{showInbox && (
+  <div className="fixed inset-0 z-[200] flex flex-col bg-[#020407]">
+    <header className="p-8 flex items-center justify-between border-b border-white/10">
+      <h3 className="text-3xl font-black text-white uppercase">Notifications</h3>
+      <button
+        onClick={() => setShowInbox(false)}
+        className="text-white/40 hover:text-white"
+      >
+        ✕
+      </button>
+    </header>
+
+    <div className="flex-1 overflow-y-auto p-8 space-y-6">
+      {notifications.length === 0 ? (
+        <p className="text-center text-white/30 uppercase text-xs">No alerts</p>
+      ) : (
+        notifications.map((n) => (
+          <div key={n.id} className="bg-white/5 border border-white/10 p-6 rounded-2xl">
+            <h5 className="font-black text-white mb-2">{n.title}</h5>
+            <p className="text-white/60 text-sm">{n.body}</p>
+          </div>
+        ))
+      )}
+    </div>
+  </div>
+)}
+
+</div>
+);
 };
 
 export default App;
+
