@@ -45,6 +45,9 @@ interface NotificationMessage {
 
 type Tab = 'home' | 'balls' | 'winners' | 'admin';
 
+// Auth flow modes
+type AuthMode = "login" | "register" | "forgot" | "reset";
+
 const ADMIN_EMAIL = 'Carlwhalliday@icloud.com';
 const TEST_EMAIL = 'test@user.com';
 
@@ -53,8 +56,10 @@ const App: React.FC = () => {
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const isLoggedIn = !!sessionEmail;
   const [userEmail, setUserEmail] = useState('');
-type AuthMode = "login" | "register" | "forgot" | "reset";
-const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false); // recovery link detection
+  const [newPassword, setNewPassword] = useState(''); // recovery password input
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
   const [showWinReveal, setShowWinReveal] = useState(false);
   
   // Modals / Admin State
@@ -169,7 +174,6 @@ const isAdmin = useMemo(() => {
     sendPush("Welcome", "Your account has been successfully created.", "admin", "reminder");
   } else {
     alert("Account created. Please check your email to confirm, then log in.");
-    setIsRegistering(false);
   }
 };
 
@@ -291,15 +295,20 @@ useEffect(() => {
     if (error) {
       console.error("Auth session error:", error.message);
     }
+    const recoveryFlag = Boolean((data.session?.user as any)?.recovery_sent_at);
+    setIsRecoveryMode(recoveryFlag);
+    if (recoveryFlag) setAuthMode("reset");
     setSessionEmail(data.session?.user.email ?? null);
   });
 
   const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
     console.log("Auth event:", event);
     if (event === "PASSWORD_RECOVERY") {
-  setAuthMode("reset");
-}
+      setAuthMode("reset");
+    }
 
+    const recoveryFlag = Boolean((session?.user as any)?.recovery_sent_at);
+    setIsRecoveryMode(recoveryFlag);
     setSessionEmail(session?.user.email ?? null);
   });
 
@@ -340,6 +349,22 @@ const handleResetPassword = async (e: React.FormEvent) => {
 
   alert("Password updated. You can now log in.");
   setAuthMode("login");
+};
+
+// Recovery modal password update (blocking)
+const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!newPassword.trim()) return;
+  setIsUpdatingPassword(true);
+  const { error } = await supabase.auth.updateUser({ password: newPassword.trim() });
+  setIsUpdatingPassword(false);
+  if (error) {
+    alert(error.message);
+    return;
+  }
+  setIsRecoveryMode(false);
+  setNewPassword('');
+  alert("Password updated.");
 };
 
 
@@ -483,116 +508,111 @@ const handleResetPassword = async (e: React.FormEvent) => {
 
       {isLoggedIn ? (
         <>
-        
-
+          {/* STRUCTURE FIX: Logged-in shell */}
           <header className="relative z-10 pt-10 px-6 text-center">
+            <div className="flex items-center justify-between max-w-6xl mx-auto w-full absolute top-6 px-6">
+              <button onClick={() => { setShowInbox(true); setNotifications(prev => prev.map(n => ({ ...n, read: true }))); }} className={`relative p-3 rounded-full border transition-all ${hasUnread ? 'bg-pink-500 border-pink-500 text-black shadow-lg animate-pulse' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                {hasUnread && <span className="absolute -top-1 -right-1 w-3 h-3 bg-white rounded-full border-2 border-pink-500"></span>}
+              </button>
+              <div className="flex items-center gap-4">
+                <span className="text-[9px] font-black uppercase text-white/20 truncate max-w-[150px] hidden md:block">{userEmail}</span>
+                <button onClick={async () => {
+                  await supabase.auth.signOut();
+                  setSessionEmail(null);
+                  setUserEmail("");
+                }} className="px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/40 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest">Sign Out</button>
+              </div>
+            </div>
+            <div className="w-12 h-12 rounded-full bg-pink-500 mx-auto flex items-center justify-center text-black font-black text-[10px] mb-4 shadow-[0_0_20px_rgba(236,72,153,0.3)] mt-12 animate-pulse">DWA</div>
+            <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">{activeTab}</h2>
+            <p className="text-pink-400 text-[9px] font-black uppercase tracking-[0.3em] mt-2">In Memory of Emmie-Rose</p>
+            {sessionEmail ? (
+              <p className="text-white/40 text-[10px] font-bold mt-2">Signed in as {sessionEmail}</p>
+            ) : (
+              <p className="text-white/40 text-[10px] font-bold mt-2">Not signed in</p>
+            )}
+            {sessionEmail ? (
+              <button
+                onClick={async () => {
+                  const perm = await Notification.requestPermission();
+                  if (perm !== "granted") {
+                    alert("Notifications permission not granted.");
+                    return;
+                  }
 
-             <div className="flex items-center justify-between max-w-6xl mx-auto w-full absolute top-6 px-6">
-                <button onClick={() => { setShowInbox(true); setNotifications(prev => prev.map(n => ({...n, read: true}))); }} className={`relative p-3 rounded-full border transition-all ${hasUnread ? 'bg-pink-500 border-pink-500 text-black shadow-lg animate-pulse' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}>
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                  {hasUnread && <span className="absolute -top-1 -right-1 w-3 h-3 bg-white rounded-full border-2 border-pink-500"></span>}
-                </button>
-                <div className="flex items-center gap-4">
-                  <span className="text-[9px] font-black uppercase text-white/20 truncate max-w-[150px] hidden md:block">{userEmail}</span>
-                  <button onClick={async () => {
-  await supabase.auth.signOut();
-  setIsLoggedIn(false);
-  setUserEmail("");
-}}
- className="px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/40 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest">Sign Out</button>
-                </div>
-             </div>
-             <div className="w-12 h-12 rounded-full bg-pink-500 mx-auto flex items-center justify-center text-black font-black text-[10px] mb-4 shadow-[0_0_20px_rgba(236,72,153,0.3)] mt-12 animate-pulse">DWA</div>
-             <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">{activeTab}</h2>
-             <p className="text-pink-400 text-[9px] font-black uppercase tracking-[0.3em] mt-2">In Memory of Emmie-Rose</p>
-             {sessionEmail ? (
-  <p className="text-white/40 text-[10px] font-bold mt-2">Signed in as {sessionEmail}</p>
-) : (
-  <p className="text-white/40 text-[10px] font-bold mt-2">Not signed in</p>
-)}
-{sessionEmail ? (
-  <button
-    onClick={async () => {
-      const perm = await Notification.requestPermission();
-      if (perm !== "granted") {
-        alert("Notifications permission not granted.");
-        return;
-      }
+                  const reg = await navigator.serviceWorker.ready;
+                  const sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    // VAPID key comes next step
+                    applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8P0Fx_pXVvyEhahuueCMkM0gThg4aeM",
+                  });
 
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        // VAPID key comes next step
-applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8P0Fx_pXVvyEhahuueCMkM0gThg4aeM",
-      });
+                  console.log("Push subscription:", JSON.stringify(sub));
+                  const {
+                    data: { user },
+                    error: userErr,
+                  } = await supabase.auth.getUser();
 
-      console.log("Push subscription:", JSON.stringify(sub));
-            const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
+                  if (userErr || !user) {
+                    alert("Not logged in.");
+                    return;
+                  }
 
-      if (userErr || !user) {
-        alert("Not logged in.");
-        return;
-      }
+                  const json = sub.toJSON();
+                  const endpoint = json.endpoint;
+                  const p256dh = json.keys?.p256dh;
+                  const auth = json.keys?.auth;
 
-      const json = sub.toJSON();
-      const endpoint = json.endpoint;
-      const p256dh = json.keys?.p256dh;
-      const auth = json.keys?.auth;
+                  if (!endpoint || !p256dh || !auth) {
+                    alert("Subscription missing required fields.");
+                    return;
+                  }
 
-      if (!endpoint || !p256dh || !auth) {
-        alert("Subscription missing required fields.");
-        return;
-      }
+                  const { error: upsertErr } = await supabase.from("push_subscriptions").upsert(
+                    {
+                      user_id: user.id,
+                      endpoint,
+                      p256dh,
+                      auth,
+                      created_at: new Date().toISOString(),
+                    },
+                    { onConflict: "endpoint" }
+                  );
 
-      const { error: upsertErr } = await supabase.from("push_subscriptions").upsert(
-        {
-  user_id: user.id,
-  endpoint,
-  p256dh,
-  auth,
-  created_at: new Date().toISOString(),
-},
-        { onConflict: "endpoint" }
-      );
+                  if (upsertErr) {
+                    alert(upsertErr.message);
+                    return;
+                  }
 
-      if (upsertErr) {
-        alert(upsertErr.message);
-        return;
-      }
+                  alert("Subscribed and saved!");
 
-      alert("Subscribed and saved!");
+                }}
+                className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
+              >
+                Enable Notifications
+              </button>
+            ) : null}
 
-    }}
-    className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
-  >
-    Enable Notifications
-  </button>
-) : null}
+            {sessionEmail ? (
+              <button
+                onClick={async () => {
+                  const { data } = await supabase.auth.getUser();
+                  const id = data.user?.id;
 
-{sessionEmail ? (
-  <button
-    onClick={async () => {
-      const { data } = await supabase.auth.getUser();
-      const id = data.user?.id;
+                  if (!id) {
+                    alert("No user (not logged in)");
+                    return;
+                  }
 
-      if (!id) {
-        alert("No user (not logged in)");
-        return;
-      }
-
-      await navigator.clipboard.writeText(id);
-      alert("Copied user id: " + id);
-    }}
-    className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
-  >
-    Copy User ID
-  </button>
-) : null}
-
-
+                  await navigator.clipboard.writeText(id);
+                  alert("Copied user id: " + id);
+                }}
+                className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
+              >
+                Copy User ID
+              </button>
+            ) : null}
           </header>
 
           <main className="relative z-10 flex-1 overflow-y-auto p-6 pb-40">
@@ -632,7 +652,7 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
 
               {activeTab === 'balls' && (
                 <div className="animate-in fade-in zoom-in-95 duration-500 space-y-10">
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 flex items-center justify-between shadow-xl"><div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Upcoming Draw</p><p className="text-2xl font-black text-white">{formattedDrawDate}</p></div><div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-white/20 font-black text-xs">Sat</div></div>
                     <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 flex items-center justify-between shadow-xl"><div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Active Prize Pot</p><p className="text-4xl font-black text-white tracking-tighter">£{currentPot}</p></div><div className="px-3 py-1 bg-pink-500 text-black text-[10px] font-black rounded-full uppercase">Live</div></div>
                   </div>
@@ -654,23 +674,23 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
 
               {activeTab === 'winners' && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-500 max-w-4xl mx-auto space-y-8">
-                   <div className="text-center mb-12">
-                     <h3 className="text-5xl font-black text-white tracking-tighter mb-2">Hall of Fame</h3>
-                     <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">Celebrating our lucky champions</p>
-                   </div>
-                   <div className="space-y-4">
-                      {pastResults.length === 0 ? (
-                        <div className="text-center py-20 opacity-20"><p className="font-black uppercase tracking-widest">No results yet</p></div>
-                      ) : pastResults.map((r, i) => (
-                        <div key={i} className="bg-white/[0.03] backdrop-blur-xl border border-white/10 p-8 rounded-[2rem] flex items-center gap-10 hover:bg-white/5 transition-all group">
-                          <LotteryBall number={r.ballNumber} className="w-20 h-20 group-hover:rotate-12 transition-transform" />
-                          <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                            <div><p className="text-[10px] font-black uppercase text-pink-500 tracking-widest mb-1">{r.date}</p><h4 className="text-3xl font-black text-white tracking-tighter leading-none">{r.winner}</h4></div>
-                            <div className="text-right"><p className="text-[10px] font-black uppercase text-white/30 mb-1">Awarded</p><p className="text-3xl font-black text-yellow-500 tracking-tighter">£{r.prizeAmount || r.charityAmount}</p></div>
-                          </div>
+                  <div className="text-center mb-12">
+                    <h3 className="text-5xl font-black text-white tracking-tighter mb-2">Hall of Fame</h3>
+                    <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">Celebrating our lucky champions</p>
+                  </div>
+                  <div className="space-y-4">
+                    {pastResults.length === 0 ? (
+                      <div className="text-center py-20 opacity-20"><p className="font-black uppercase tracking-widest">No results yet</p></div>
+                    ) : pastResults.map((r, i) => (
+                      <div key={i} className="bg-white/[0.03] backdrop-blur-xl border border-white/10 p-8 rounded-[2rem] flex items-center gap-10 hover:bg-white/5 transition-all group">
+                        <LotteryBall number={r.ballNumber} className="w-20 h-20 group-hover:rotate-12 transition-transform" />
+                        <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          <div><p className="text-[10px] font-black uppercase text-pink-500 tracking-widest mb-1">{r.date}</p><h4 className="text-3xl font-black text-white tracking-tighter leading-none">{r.winner}</h4></div>
+                          <div className="text-right"><p className="text-[10px] font-black uppercase text-white/30 mb-1">Awarded</p><p className="text-3xl font-black text-yellow-500 tracking-tighter">£{r.prizeAmount || r.charityAmount}</p></div>
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -704,7 +724,7 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
                                       <button onClick={() => handleRemoveBall(num)} className="p-2 bg-white/5 text-white/30 hover:text-white rounded-lg"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
                                     </>
                                   ) : (
-                                    <button onClick={() => setAdminAction({type: 'assign', ballNum: num})} className="px-3 py-1.5 bg-white/5 text-white/40 text-[9px] font-black uppercase rounded-lg hover:bg-white/10 transition-all">Assign Member</button>
+                                    <button onClick={() => setAdminAction({ type: 'assign', ballNum: num })} className="px-3 py-1.5 bg-white/5 text-white/40 text-[9px] font-black uppercase rounded-lg hover:bg-white/10 transition-all">Assign Member</button>
                                   )}
                                 </div>
                               </div>
@@ -715,13 +735,13 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-8">Quick Actions</h4>
                         <div className="grid grid-cols-2 gap-4">
-                          <button onClick={() => setAdminAction({type: 'result'})} className="flex flex-col items-center justify-center p-8 bg-white/5 border border-white/5 rounded-3xl hover:bg-white/10 transition-all gap-3">
-                             <svg className="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                             <span className="text-[10px] font-black uppercase text-white/40 tracking-widest text-center">Add Result</span>
+                          <button onClick={() => setAdminAction({ type: 'result' })} className="flex flex-col items-center justify-center p-8 bg-white/5 border border-white/5 rounded-3xl hover:bg-white/10 transition-all gap-3">
+                            <svg className="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                            <span className="text-[10px] font-black uppercase text-white/40 tracking-widest text-center">Add Result</span>
                           </button>
-                          <button onClick={() => { if(confirm("Reset pot?")) setTotalRollover(0); }} className="flex flex-col items-center justify-center p-8 bg-white/5 border border-white/5 rounded-3xl hover:bg-white/10 transition-all gap-3">
-                             <svg className="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9" /></svg>
-                             <span className="text-[10px] font-black uppercase text-white/40 tracking-widest text-center">Reset Pot</span>
+                          <button onClick={() => { if (confirm("Reset pot?")) setTotalRollover(0); }} className="flex flex-col items-center justify-center p-8 bg-white/5 border border-white/5 rounded-3xl hover:bg-white/10 transition-all gap-3">
+                            <svg className="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9" /></svg>
+                            <span className="text-[10px] font-black uppercase text-white/40 tracking-widest text-center">Reset Pot</span>
                           </button>
                         </div>
                       </div>
@@ -731,39 +751,39 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3 mb-8">Broadcaster</h4>
                         <div className="space-y-6">
                           <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Target</label><div className="flex gap-2">{(['all', 'unpaid'] as const).map(t => (
-                                <button key={t} onClick={() => setBlastTarget(t)} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${blastTarget === t ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>{t}</button>
-                              ))}</div></div>
+                            <button key={t} onClick={() => setBlastTarget(t)} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${blastTarget === t ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>{t}</button>
+                          ))}</div></div>
                           <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Payload</label><textarea value={blastMessage} onChange={(e) => setBlastMessage(e.target.value)} rows={5} placeholder="Message text..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm outline-none focus:border-pink-500 transition-all resize-none" /></div>
                           <button disabled={isTransmitting || !blastMessage} onClick={() => sendPush("Announcement", blastMessage, blastTarget, 'blast')} className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10">{isTransmitting ? 'Transmitting...' : 'Send Broadcast'}</button>
-                         <button
-  onClick={async () => {
-    const res = await fetch("/.netlify/functions/push-broadcast", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Test Push", body: "Hello from Netlify Function ✅" }),
-    });
+                          <button
+                            onClick={async () => {
+                              const res = await fetch("/.netlify/functions/push-broadcast", {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                body: JSON.stringify({ title: "Test Push", body: "Hello from Netlify Function ✅" }),
+                              });
 
-    const text = await res.text();
-    if (!res.ok) {
-      alert(text);
-      return;
-    }
-    alert(text);
-  }}
-  className="w-full py-4 bg-white/10 text-white font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-white/20 transition-all"
->
-  Send Test Push (Real)
-</button>
+                              const text = await res.text();
+                              if (!res.ok) {
+                                alert(text);
+                                return;
+                              }
+                              alert(text);
+                            }}
+                            className="w-full py-4 bg-white/10 text-white font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-white/20 transition-all"
+                          >
+                            Send Test Push (Real)
+                          </button>
 
                         </div>
                       </div>
                       <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-[2.5rem] p-10 text-black shadow-2xl">
-                         <div className="flex justify-between items-start mb-10"><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60">Revenue</p><h4 className="text-4xl font-black tracking-tighter leading-none">{paidCount > 0 ? 'Active' : 'Growth'}</h4></div><div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></div></div>
-                         <div className="space-y-4">
-                           <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Paid Members</span><span>{paidCount}/59</span></div>
-                           <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Total Raised</span><span>£{totalRaised}</span></div>
-                           <div className="flex justify-between text-xs font-bold"><span>Prize Pot</span><span>£{currentPot}</span></div>
-                         </div>
+                        <div className="flex justify-between items-start mb-10"><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60">Revenue</p><h4 className="text-4xl font-black tracking-tighter leading-none">{paidCount > 0 ? 'Active' : 'Growth'}</h4></div><div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></div></div>
+                        <div className="space-y-4">
+                          <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Paid Members</span><span>{paidCount}/59</span></div>
+                          <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Total Raised</span><span>£{totalRaised}</span></div>
+                          <div className="flex justify-between text-xs font-bold"><span>Prize Pot</span><span>£{currentPot}</span></div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -787,10 +807,121 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
                     </div>
                     <span className="text-[8px] font-black uppercase tracking-widest text-white/30 group-hover:text-white transition-colors">{t}</span>
                   </button>
-                )
+                );
               })}
             </div>
           </nav>
+
+          {/* ADMIN ACTION MODAL */}
+          {adminAction && isAdmin && (
+            <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 animate-in fade-in duration-300">
+              <div
+                className="absolute inset-0 bg-black/90 backdrop-blur-2xl"
+                onClick={() => setAdminAction(null)}
+              />
+              <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 shadow-2xl">
+                <button
+                  onClick={() => setAdminAction(null)}
+                  className="absolute top-8 right-8 text-white/20 hover:text-white"
+                >
+                  ✕
+                </button>
+
+                {adminAction.type === "assign" && (
+                  <div className="space-y-6 text-center">
+                    <LotteryBall number={adminAction.ballNum!} className="w-32 h-32 mx-auto" />
+                    <input
+                      autoFocus
+                      value={assignmentName}
+                      onChange={(e) => setAssignmentName(e.target.value)}
+                      placeholder="Member name"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
+                    />
+                    <button
+                      onClick={commitAssignment}
+                      className="w-full py-4 bg-pink-500 text-black font-black rounded-xl"
+                    >
+                      Confirm Assignment
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* DETAIL MODAL */}
+          {selectedBallNum && !adminAction && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+              <div
+                className="absolute inset-0 bg-black/90 backdrop-blur-2xl"
+                onClick={() => setSelectedBallNum(null)}
+              />
+              <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 text-center">
+                <button
+                  onClick={() => setSelectedBallNum(null)}
+                  className="absolute top-8 right-8 text-white/20 hover:text-white"
+                >
+                  ✕
+                </button>
+                <LotteryBall number={selectedBallNum} className="w-56 h-56 mx-auto mb-8" />
+              </div>
+            </div>
+          )}
+
+          {/* INBOX */}
+          {showInbox && (
+            <div className="fixed inset-0 z-[200] flex flex-col bg-[#020407]">
+              <header className="p-8 flex items-center justify-between border-b border-white/10">
+                <h3 className="text-3xl font-black text-white uppercase">Notifications</h3>
+                <button
+                  onClick={() => setShowInbox(false)}
+                  className="text-white/40 hover:text-white"
+                >
+                  ✕
+                </button>
+              </header>
+
+              <div className="flex-1 overflow-y-auto p-8 space-y-6">
+                {notifications.length === 0 ? (
+                  <p className="text-center text-white/30 uppercase text-xs">No alerts</p>
+                ) : (
+                  notifications.map((n) => (
+                    <div key={n.id} className="bg-white/5 border border-white/10 p-6 rounded-2xl">
+                      <h5 className="font-black text-white mb-2">{n.title}</h5>
+                      <p className="text-white/60 text-sm">{n.body}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* RECOVERY MODAL (blocking) */}
+          {isRecoveryMode && (
+            <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-black/90 backdrop-blur-2xl">
+              <div className="w-full max-w-md bg-[#0b0f16] border border-pink-500/40 rounded-[2rem] p-8 text-center shadow-2xl">
+                <h3 className="text-2xl font-black text-white mb-3">Set a New Password</h3>
+                <p className="text-white/60 text-sm mb-6">For security, please choose a new password before continuing.</p>
+                <form onSubmit={handleRecoveryPasswordSubmit} className="space-y-4">
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-pink-500"
+                    placeholder="New password"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newPassword || isUpdatingPassword}
+                    className="w-full py-4 bg-pink-500 text-black font-black uppercase tracking-widest text-xs rounded-xl disabled:opacity-40"
+                  >
+                    {isUpdatingPassword ? 'Updating...' : 'Update Password'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
         </>
       ) : (
   /* Login / Register */
@@ -835,141 +966,156 @@ applicationServerKey: "BF0JTRjgcFnKfEuf1fE2kGQVW46CHgNRWe_VI_92DMtGsoEpixnIcOUd8
       </p>
     </div>
 
-    {/* REGISTER */}
-    {authMode === "register" && (
-      <form onSubmit={handleRegister} className="space-y-6 relative z-10">
-        <input name="email" required type="email" />
-        <input name="password" required type="password" />
-        <button type="submit">Create Account</button>
-        <button type="button" onClick={() => setAuthMode("login")}>
-          Already have an account?
-        </button>
-      </form>
-    )}
+   <div className="w-full max-w-md bg-white/[0.03] backdrop-blur-3xl border border-white/10 p-10 rounded-[3rem] shadow-2xl relative z-10 animate-in fade-in slide-in-from-bottom-10 duration-700">
+  {/* LOGIN */}
+  {authMode === "login" && (
+    <form onSubmit={handleLogin} className="space-y-6">
+      <div className="space-y-2">
+        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
+          Email
+        </label>
+        <input
+          name="email"
+          required
+          type="email"
+          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
+        />
+      </div>
 
-    {/* LOGIN */}
-    {authMode === "login" && (
-      <form onSubmit={handleLogin} className="space-y-6 relative z-10">
-        <input name="email" required type="email" />
-        <input name="password" required type="password" />
-        <button type="submit">Login</button>
-        <button type="button" onClick={() => setAuthMode("register")}>
+      <div className="space-y-2">
+        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
+          Password
+        </label>
+        <input
+          name="password"
+          required
+          type="password"
+          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
+        />
+      </div>
+
+      <button
+        type="submit"
+        className="w-full py-5 bg-white text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-500 hover:text-white transition-all"
+      >
+        Enter Platform
+      </button>
+
+      <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-white/30">
+        <button type="button" onClick={() => setAuthMode("register")} className="hover:text-white">
           Register
         </button>
-        <button type="button" onClick={() => setAuthMode("forgot")}>
+        <button type="button" onClick={() => setAuthMode("forgot")} className="hover:text-white">
           Forgot password?
         </button>
-      </form>
-    )}
+      </div>
+    </form>
+  )}
 
-    {/* FORGOT PASSWORD */}
-    {authMode === "forgot" && (
-      <form onSubmit={handleForgotPassword} className="space-y-6 relative z-10">
-        <input name="email" required type="email" />
-        <button type="submit">Send reset email</button>
-        <button type="button" onClick={() => setAuthMode("login")}>
-          Back to login
-        </button>
-      </form>
-    )}
+  {/* REGISTER */}
+  {authMode === "register" && (
+    <form onSubmit={handleRegister} className="space-y-6">
+      <div className="space-y-2">
+        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
+          Email
+        </label>
+        <input
+          name="email"
+          required
+          type="email"
+          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
+        />
+      </div>
 
-    {/* RESET PASSWORD */}
-    {authMode === "reset" && (
-      <form onSubmit={handleResetPassword} className="space-y-6 relative z-10">
-        <input name="password" required type="password" />
-        <button type="submit">Set new password</button>
-      </form>
-    )}
-    </main>
-)}
+      <div className="space-y-2">
+        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
+          Password
+        </label>
+        <input
+          name="password"
+          required
+          type="password"
+          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
+        />
+      </div>
 
-{/* ADMIN ACTION MODAL */}
-{adminAction && isAdmin && (
-  <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 animate-in fade-in duration-300">
-    <div
-      className="absolute inset-0 bg-black/90 backdrop-blur-2xl"
-      onClick={() => setAdminAction(null)}
-    />
-    <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 shadow-2xl">
       <button
-        onClick={() => setAdminAction(null)}
-        className="absolute top-8 right-8 text-white/20 hover:text-white"
+        type="submit"
+        className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-400 transition-all"
       >
-        ✕
+        Create Account
       </button>
 
-      {adminAction.type === "assign" && (
-        <div className="space-y-6 text-center">
-          <LotteryBall number={adminAction.ballNum!} className="w-32 h-32 mx-auto" />
-          <input
-            autoFocus
-            value={assignmentName}
-            onChange={(e) => setAssignmentName(e.target.value)}
-            placeholder="Member name"
-            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
-          />
-          <button
-            onClick={commitAssignment}
-            className="w-full py-4 bg-pink-500 text-black font-black rounded-xl"
-          >
-            Confirm Assignment
-          </button>
-        </div>
-      )}
-    </div>
-  </div>
-)}
-
-{/* DETAIL MODAL */}
-{selectedBallNum && !adminAction && (
-  <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-    <div
-      className="absolute inset-0 bg-black/90 backdrop-blur-2xl"
-      onClick={() => setSelectedBallNum(null)}
-    />
-    <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 text-center">
       <button
-        onClick={() => setSelectedBallNum(null)}
-        className="absolute top-8 right-8 text-white/20 hover:text-white"
+        type="button"
+        onClick={() => setAuthMode("login")}
+        className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all"
       >
-        ✕
+        Already have an account?
       </button>
-      <LotteryBall number={selectedBallNum} className="w-56 h-56 mx-auto mb-8" />
-    </div>
-  </div>
-)}
+    </form>
+  )}
 
-{/* INBOX */}
-{showInbox && (
-  <div className="fixed inset-0 z-[200] flex flex-col bg-[#020407]">
-    <header className="p-8 flex items-center justify-between border-b border-white/10">
-      <h3 className="text-3xl font-black text-white uppercase">Notifications</h3>
+  {/* FORGOT PASSWORD */}
+  {authMode === "forgot" && (
+    <form onSubmit={handleForgotPassword} className="space-y-6">
+      <div className="space-y-2">
+        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
+          Email
+        </label>
+        <input
+          name="email"
+          required
+          type="email"
+          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
+        />
+      </div>
+
       <button
-        onClick={() => setShowInbox(false)}
-        className="text-white/40 hover:text-white"
+        type="submit"
+        className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-400 transition-all"
       >
-        ✕
+        Send reset email
       </button>
-    </header>
 
-    <div className="flex-1 overflow-y-auto p-8 space-y-6">
-      {notifications.length === 0 ? (
-        <p className="text-center text-white/30 uppercase text-xs">No alerts</p>
-      ) : (
-        notifications.map((n) => (
-          <div key={n.id} className="bg-white/5 border border-white/10 p-6 rounded-2xl">
-            <h5 className="font-black text-white mb-2">{n.title}</h5>
-            <p className="text-white/60 text-sm">{n.body}</p>
-          </div>
-        ))
-      )}
-    </div>
-  </div>
+      <button
+        type="button"
+        onClick={() => setAuthMode("login")}
+        className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all"
+      >
+        Back to login
+      </button>
+    </form>
+  )}
+
+{/* RESET PASSWORD */}
+{authMode === "reset" && (
+  <form onSubmit={handleResetPassword} className="space-y-6">
+    <div className="space-y-2">
+        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
+          New Password
+        </label>
+        <input
+          name="password"
+          required
+          type="password"
+          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
+        />
+      </div>
+
+      <button
+        type="submit"
+      className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-400 transition-all"
+  >
+    Set new password
+  </button>
+</form>
 )}
-
-</div>
-);
+    </div>
+  </main>
+    )}
+  </div>
+  );
 };
 
 export default App;
-
