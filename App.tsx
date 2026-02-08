@@ -877,6 +877,40 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     </button>
                   </div>
                 )}
+                {adminAction.type === "payment" && (
+                  <div className="space-y-6 text-center">
+                    <LotteryBall number={adminAction.ballNum!} className="w-32 h-32 mx-auto" />
+                    <p className="text-white/70 text-sm">Record payment for Ball #{adminAction.ballNum}</p>
+                    <div className="flex gap-3 justify-center">
+                      <button
+                        onClick={() => setPaymentWeeks('1')}
+                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border ${paymentWeeks === '1' ? 'bg-pink-500 border-pink-500 text-black' : 'bg-white/5 border-white/10 text-white/60'}`}
+                      >
+                        1 week
+                      </button>
+                      <button
+                        onClick={() => setPaymentWeeks('4')}
+                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border ${paymentWeeks === '4' ? 'bg-pink-500 border-pink-500 text-black' : 'bg-white/5 border-white/10 text-white/60'}`}
+                      >
+                        4 weeks
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      min="1"
+                      value={paymentWeeks}
+                      onChange={(e) => setPaymentWeeks(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-center"
+                      placeholder="Weeks to add"
+                    />
+                    <button
+                      onClick={commitPayment}
+                      className="w-full py-4 bg-pink-500 text-black font-black rounded-xl"
+                    >
+                      Confirm Payment
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
