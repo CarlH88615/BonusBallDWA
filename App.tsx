@@ -508,6 +508,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
   };
 
   const hasUnread = notifications.some(n => !n.read);
+  const selectedBall = balls.find(b => b.number === selectedBallNum);
 
   return (
     <div className="relative min-h-screen bg-[#020407] overflow-hidden flex flex-col font-display">
@@ -888,16 +889,22 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 onClick={() => setSelectedBallNum(null)}
               />
               <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 text-center">
-                <button
-                  onClick={() => setSelectedBallNum(null)}
-                  className="absolute top-8 right-8 text-white/20 hover:text-white"
-                >
-                  ✕
-                </button>
-                <LotteryBall number={selectedBallNum} className="w-56 h-56 mx-auto mb-8" />
-              </div>
+              <button
+                onClick={() => setSelectedBallNum(null)}
+                className="absolute top-8 right-8 text-white/20 hover:text-white"
+              >
+                ✕
+              </button>
+              <LotteryBall number={selectedBallNum} className="w-56 h-56 mx-auto mb-8" />
+              {selectedBall && (
+                <div className="space-y-2 text-white">
+                  <p className="text-lg font-black">{selectedBall.owner ?? 'Unassigned'}</p>
+                  <p className="text-sm text-white/70">Paid until and including {selectedBall.paidUntil}</p>
+                </div>
+              )}
             </div>
-          )}
+          </div>
+        )}
 
           {/* INBOX */}
           {showInbox && (
