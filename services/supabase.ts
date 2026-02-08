@@ -1,12 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = "https://fsazyqcgpxvgckgllwkw.supabase.co";
-console.log("VITE_SUPABASE_ANON_KEY present =", Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY));
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+console.log("SUPABASE URL =", supabaseUrl);
+console.log("SUPABASE ANON KEY present =", !!supabaseAnonKey);
 
 export const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL!,
-  import.meta.env.VITE_SUPABASE_ANON_KEY!,
+  supabaseUrl!,
+  supabaseAnonKey!,
   {
     auth: {
       persistSession: true,
@@ -16,3 +18,4 @@ export const supabase = createClient(
     },
   }
 );
+
