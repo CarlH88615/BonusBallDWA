@@ -92,6 +92,8 @@ const App: React.FC = () => {
   const [rolloverAmount, setRolloverAmount] = useState(0);
   const [selectedResultBall, setSelectedResultBall] = useState<number | null>(null);
   const [winnerRows, setWinnerRows] = useState<any[]>([]);
+  const [drawDate, setDrawDate] = useState<string | null>(null);
+  const [drawTimestamp, setDrawTimestamp] = useState<string | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -111,37 +113,32 @@ const isAdmin = useMemo(() => {
   const paidCount = useMemo(() => Object.values(managedBallData).filter(b => b.status === 'paid' || b.status === 'lifetime').length, [managedBallData]);
   const totalRaised = useMemo(() => pastResults.reduce((acc, curr) => acc + curr.charityAmount, 0), [pastResults]);
 
-  const defaultNextDraw = useMemo(() => {
-    const now = new Date();
-    const resultDate = new Date(now.getTime());
-    resultDate.setDate(now.getDate() + (7 + 6 - now.getDay()) % 7);
-    if (now.getDay() === 6 && now.getHours() >= 20) {
-      resultDate.setDate(resultDate.getDate() + 7);
-    }
-    return resultDate.toISOString().split('T')[0];
-  }, []);
-  const [nextDrawRawDate] = useState(defaultNextDraw);
-
-  const upcomingDrawDate = useMemo(() => new Date(nextDrawRawDate), [nextDrawRawDate]);
+  const upcomingDrawDate = useMemo(() => drawDate ? new Date(drawDate) : null, [drawDate]);
   const upcomingDrawDateTime = useMemo(() => {
-    const d = new Date(nextDrawRawDate);
-    d.setHours(20, 0, 0, 0);
-    return d;
-  }, [nextDrawRawDate]);
+    if (drawTimestamp) return new Date(drawTimestamp);
+    if (drawDate) {
+      const d = new Date(drawDate);
+      d.setHours(20, 0, 0, 0);
+      return d;
+    }
+    return null;
+  }, [drawDate, drawTimestamp]);
   const currentPot = useMemo(() => {
     const coveredCount = balls.reduce((acc, ball) => {
       if (!ball.paidUntil) return acc;
       const paidUntilDate = new Date(ball.paidUntil);
       const normalizedPaidUntil = new Date(paidUntilDate);
       normalizedPaidUntil.setHours(20, 0, 0, 0);
+      if (!upcomingDrawDateTime) return acc;
       return normalizedPaidUntil >= upcomingDrawDateTime ? acc + 1 : acc;
     }, 0);
     return totalRollover + coveredCount * 2;
   }, [balls, upcomingDrawDateTime, totalRollover]);
 
   const formattedDrawDate = useMemo(() => {
-    return new Date(nextDrawRawDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-  }, [nextDrawRawDate]);
+    if (!drawDate) return '';
+    return new Date(drawDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  }, [drawDate]);
   const baselineSaturday = useMemo(() => {
     const today = new Date();
     const sat = new Date(today);
@@ -402,6 +399,20 @@ useEffect(() => {
   });
 
   return () => sub.subscription.unsubscribe();
+}, []);
+useEffect(() => {
+  supabase
+    .from("bonus_ball_config")
+    .select("current_draw_date, current_draw_timestamp")
+    .single()
+    .then(({ data, error }) => {
+      if (error) {
+        console.error("❌ Failed to load draw config", error);
+        return;
+      }
+      setDrawDate(data.current_draw_date ?? null);
+      setDrawTimestamp(data.current_draw_timestamp ?? null);
+    });
 }, []);
 useEffect(() => {
   supabase
