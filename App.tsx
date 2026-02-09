@@ -942,10 +942,27 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
               {activeTab === 'balls' && (
                 <div className="animate-in fade-in zoom-in-95 duration-500 space-y-10">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 flex items-center justify-between shadow-xl"><div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Upcoming Draw</p><p className="text-2xl font-black text-white">{formattedDrawDate}</p></div><div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-white/20 font-black text-xs">Sat</div></div>
-                    <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 flex items-center justify-between shadow-xl"><div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Paid Prize Pot</p><p className="text-3xl font-black text-white tracking-tighter">£{currentPot - totalRollover}</p></div></div>
-                    <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 flex items-center justify-between shadow-xl"><div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Rollover Prize</p><p className="text-3xl font-black text-white tracking-tighter">£{totalRollover}</p></div><div className="px-3 py-1 bg-pink-500 text-black text-[10px] font-black rounded-full uppercase">Total £{currentPot}</div></div>
+                    <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 shadow-xl">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Active Prize</p>
+                          <p className="text-4xl font-black text-white tracking-tighter">£{currentPot}</p>
+                        </div>
+                        <div className="px-3 py-1 bg-pink-500 text-black text-[10px] font-black rounded-full uppercase">Live</div>
+                      </div>
+                      <div className="mt-4 space-y-1 text-xs text-white/60 font-bold uppercase tracking-widest">
+                        <div className="flex justify-between">
+                          <span>Paid this draw</span>
+                          <span>£{currentPot - totalRollover}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Rollover</span>
+                          <span>£{totalRollover}</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-[3rem] p-10 md:p-14 shadow-2xl">
                     <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-6">
