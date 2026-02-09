@@ -490,8 +490,10 @@ useEffect(() => {
     });
 }, []);
 useEffect(() => {
-  fetchBankBalance();
-}, []);
+  if (sessionEmail) {
+    fetchBankBalance();
+  }
+}, [sessionEmail]);
 useEffect(() => {
   const fetchWinners = () => {
     supabase
