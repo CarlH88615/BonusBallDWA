@@ -88,6 +88,7 @@ const App: React.FC = () => {
   const [balls, setBalls] = useState<any[]>([]);
   const [bonusBallRowId, setBonusBallRowId] = useState<string | null>(null);
   const [showNotCoveredOnly, setShowNotCoveredOnly] = useState(false);
+  const [applyToAllOwner, setApplyToAllOwner] = useState(false);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -462,42 +463,48 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       };
     });
 
-    const ballIdx = balls.findIndex(b => b.number === num);
-    if (ballIdx !== -1) {
-      if (!bonusBallRowId) return;
+    const selectedBall = balls.find(b => b.number === num);
+    const targetOwner = applyToAllOwner ? selectedBall?.owner : null;
+    const affectedNumbers = applyToAllOwner && targetOwner
+      ? balls.filter(b => b.owner === targetOwner).map(b => b.number)
+      : [num];
+
+    const updatedBalls = balls.map(ball => {
+      if (!affectedNumbers.includes(ball.number)) return ball;
       const today = new Date();
       const saturday = new Date(today);
       saturday.setHours(0, 0, 0, 0);
       saturday.setDate(today.getDate() - ((today.getDay() + 1) % 7));
 
-      const existingPaidUntil = balls[ballIdx].paidUntil ? new Date(balls[ballIdx].paidUntil) : null;
+      const existingPaidUntil = ball.paidUntil ? new Date(ball.paidUntil) : null;
       const startDate = existingPaidUntil && existingPaidUntil > saturday ? existingPaidUntil : saturday;
       const newPaidUntilDate = new Date(startDate);
       newPaidUntilDate.setDate(newPaidUntilDate.getDate() + (weeks * 7));
       const formattedPaidUntil = newPaidUntilDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', '');
+      return { ...ball, paidUntil: formattedPaidUntil };
+    });
 
-      const updatedBalls = [...balls];
-      updatedBalls[ballIdx] = { ...balls[ballIdx], paidUntil: formattedPaidUntil };
+    if (!bonusBallRowId) return;
 
-      console.log(`💾 Persisting payment for bonus_ball_data row ${bonusBallRowId}`);
-      console.log(`💾 Persisting payment for ball ${num}`);
-      const { error: updateErr } = await supabase
-        .from("bonus_ball_data")
-        .update({ state: { balls: updatedBalls } })
-        .eq("id", bonusBallRowId)
-        .select()
-        .single();
-      if (updateErr) {
-        console.error("❌ Failed to persist payment", updateErr);
-      } else {
-        setBalls(updatedBalls);
-        console.log("✅ Payment persisted");
-      }
+    console.log(`💾 Persisting payment for bonus_ball_data row ${bonusBallRowId}`);
+    console.log(`💾 Persisting payment for ball ${num}`);
+    const { error: updateErr } = await supabase
+      .from("bonus_ball_data")
+      .update({ state: { balls: updatedBalls } })
+      .eq("id", bonusBallRowId)
+      .select()
+      .single();
+    if (updateErr) {
+      console.error("❌ Failed to persist payment", updateErr);
+    } else {
+      setBalls(updatedBalls);
+      console.log("✅ Payment persisted");
     }
 
     sendPush("Payment Logged", `Received payment for Ball #${num} (${weeks} week${weeks > 1 ? 's' : ''})`, "admin", "reminder");
     setAdminAction(null);
     setPaymentWeeks('1');
+    setApplyToAllOwner(false);
     setSelectedBallNum(null);
   };
 
@@ -970,6 +977,15 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-center"
                       placeholder="Weeks to add"
                     />
+                    <label className="flex items-center gap-2 justify-center text-[10px] font-black uppercase tracking-widest text-white/60">
+                      <input
+                        type="checkbox"
+                        className="accent-pink-500"
+                        checked={applyToAllOwner}
+                        onChange={(e) => setApplyToAllOwner(e.target.checked)}
+                      />
+                      Apply to all numbers owned by this person
+                    </label>
                     <button
                       onClick={commitPayment}
                       className="w-full py-4 bg-pink-500 text-black font-black rounded-xl"
