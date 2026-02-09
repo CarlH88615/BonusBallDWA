@@ -1021,8 +1021,8 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-[3rem] p-10 md:p-14 shadow-2xl">
                     <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-6">
                       {balls.map((ball) => {
-                        const num = ball.number;
-                        const ownerName = ball.owner;
+                        const num = ball.number ?? ball.id ?? Math.random();
+                        const ownerName = ball?.owner;
                         return (
                           <div key={num} onClick={() => setSelectedBallNum(num)} className="group cursor-pointer transition-all flex flex-col items-center gap-2">
                             <LotteryBall number={num} className="w-full group-hover:scale-110 transition-transform" opacity={ownerName ? 1 : 0.1} />
@@ -1079,8 +1079,8 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         </div>
                         <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                           {balls.map((ball) => {
-                            const num = ball.number;
-                            const ownerName = ball.owner;
+                            const num = ball.number ?? ball.id ?? Math.random();
+                            const ownerName = ball?.owner;
                             const nextDueDate = ball.paidUntil
                               ? new Date(new Date(ball.paidUntil).getTime() + 7 * 24 * 60 * 60 * 1000)
                               : null;
