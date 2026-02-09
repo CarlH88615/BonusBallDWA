@@ -97,6 +97,21 @@ const App: React.FC = () => {
   const [drawDateInput, setDrawDateInput] = useState<string>('');
   const [drawTimeInput, setDrawTimeInput] = useState<string>('');
   const [bankBalance, setBankBalance] = useState<number>(0);
+  const fetchBankBalance = () => {
+    console.log("🔥 FETCHING bonus_ball_bank");
+    supabase
+      .from("bonus_ball_bank")
+      .select("balance")
+      .single()
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("❌ Failed to load bank", error);
+          return;
+        }
+        console.log("✅ bonus_ball_bank fetched", data);
+        setBankBalance(data?.balance ?? 0);
+      });
+  };
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -209,13 +224,11 @@ const isAdmin = useMemo(() => {
             .from("bonus_ball_bank")
             .update({ balance: (bankBalance ?? 0) + bankDelta })
             .eq("id", 1)
-            .select("balance")
-            .single()
-            .then(({ data: bankData, error: bankErr }) => {
+            .then(({ error: bankErr }) => {
               if (bankErr) {
                 console.error("❌ Failed to update bank balance", bankErr);
               } else {
-                setBankBalance(bankData?.balance ?? bankBalance);
+                fetchBankBalance();
               }
             });
           supabase
@@ -477,19 +490,7 @@ useEffect(() => {
     });
 }, []);
 useEffect(() => {
-  console.log("🔥 FETCHING bonus_ball_bank");
-  supabase
-    .from("bonus_ball_bank")
-    .select("balance")
-    .single()
-    .then(({ data, error }) => {
-      if (error) {
-        console.error("❌ Failed to load bank", error);
-        return;
-      }
-      console.log("✅ bonus_ball_bank fetched", data);
-      setBankBalance(data?.balance ?? 0);
-    });
+  fetchBankBalance();
 }, []);
 useEffect(() => {
   const fetchWinners = () => {
@@ -693,16 +694,14 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       console.log("✅ Payment persisted");
     }
     const paymentAmount = weeks * 2 * affectedNumbers.length;
-    const { data: bankData, error: bankErr } = await supabase
+    const { error: bankErr } = await supabase
       .from("bonus_ball_bank")
       .update({ balance: (bankBalance ?? 0) + paymentAmount })
-      .eq("id", 1)
-      .select("balance")
-      .single();
+      .eq("id", 1);
     if (bankErr) {
       console.error("❌ Failed to update bank balance", bankErr);
     } else {
-      setBankBalance(bankData?.balance ?? bankBalance);
+      fetchBankBalance();
     }
 
     sendPush("Payment Logged", `Received payment for Ball #${num} (${weeks} week${weeks > 1 ? 's' : ''})`, "admin", "reminder");
@@ -1000,7 +999,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             </label>
                             <input type="text" placeholder="Search..." className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-pink-500" value={adminSearchTerm} onChange={(e) => setAdminSearchTerm(e.target.value)} />
                           </div>
-                          <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mt-4">Total paid (including advance): £{totalBank}</p>
                         </div>
                         <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                           {balls.map((ball) => {
