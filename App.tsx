@@ -124,6 +124,24 @@ const isAdmin = useMemo(() => {
   const formattedDrawDate = useMemo(() => {
     return new Date(nextDrawRawDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [nextDrawRawDate]);
+  const baselineSaturday = useMemo(() => {
+    const today = new Date();
+    const sat = new Date(today);
+    sat.setHours(0, 0, 0, 0);
+    sat.setDate(today.getDate() - ((today.getDay() + 1) % 7));
+    return sat;
+  }, []);
+  const totalBank = useMemo(() => {
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    return balls.reduce((sum, ball) => {
+      if (!ball.paidUntil) return sum;
+      const paidUntilDate = new Date(ball.paidUntil);
+      if (paidUntilDate < baselineSaturday) return sum;
+      const weeksPaid = Math.floor((paidUntilDate.getTime() - baselineSaturday.getTime()) / weekMs) + 1;
+      const ballAmount = weeksPaid * 2;
+      return sum + ballAmount;
+    }, 0);
+  }, [balls, baselineSaturday]);
 
   const latestWin = pastResults.length > 0 ? pastResults[0] : null;
 
@@ -796,6 +814,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             </label>
                             <input type="text" placeholder="Search..." className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-pink-500" value={adminSearchTerm} onChange={(e) => setAdminSearchTerm(e.target.value)} />
                           </div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mt-4">Total paid (including advance): £{totalBank}</p>
                         </div>
                         <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                           {balls.map((ball) => {
