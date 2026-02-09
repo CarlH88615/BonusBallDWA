@@ -112,6 +112,28 @@ const App: React.FC = () => {
         setBankBalance(data?.balance ?? 0);
       });
   };
+  const updateBallState = async (ballId: number, partial: Record<string, any>, options?: { replace?: boolean }) => {
+    const replace = options?.replace ?? false;
+    const { data: stateRow, error: stateErr } = await supabase
+      .from("bonus_ball_data")
+      .select("state")
+      .eq("id", ballId)
+      .single();
+    if (stateErr) {
+      console.error("❌ Failed to load ball state", stateErr);
+      return false;
+    }
+    const nextState = replace ? partial : { ...(stateRow?.state ?? {}), ...partial };
+    const { error: updErr } = await supabase
+      .from("bonus_ball_data")
+      .update({ state: nextState })
+      .eq("id", ballId);
+    if (updErr) {
+      console.error("❌ Failed to persist ball state", updErr);
+      return false;
+    }
+    return true;
+  };
   const [resetPin, setResetPin] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   
@@ -668,24 +690,8 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       return;
     }
     console.log("🧪 assign persisting");
-    const { data: stateRow, error: stateErr } = await supabase
-      .from("bonus_ball_data")
-      .select("state")
-      .eq("id", num)
-      .single();
-    if (stateErr) {
-      console.error("❌ Failed to load ball state for assignment", stateErr);
-      return;
-    }
-    const newState = { ...(stateRow?.state ?? {}), owner: assignmentName.trim() };
-    const { error: assignErr } = await supabase
-      .from("bonus_ball_data")
-      .update({ state: newState })
-      .eq("id", num);
-    if (assignErr) {
-      console.error("❌ Failed to persist assignment", assignErr);
-      return;
-    }
+    const okAssign = await updateBallState(num, { owner: assignmentName.trim() });
+    if (!okAssign) return;
     const updatedBalls = balls.map(b => b.number === num ? { ...b, owner: assignmentName.trim() } : b);
     setManagedBallData(prev => ({
       ...prev,
@@ -757,22 +763,11 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     console.log(`💾 Persisting payment for ball ${num}`);
     for (const targetNum of affectedNumbers) {
       const updatedBall = updatedBalls.find(b => b.number === targetNum);
-      const { data: stateRow, error: stateErr } = await supabase
-        .from("bonus_ball_data")
-        .select("state")
-        .eq("id", targetNum)
-        .single();
-      if (stateErr) {
-        console.error("❌ Failed to load ball state for payment", stateErr);
-        continue;
-      }
-      const mergedState = { ...(stateRow?.state ?? {}), ...updatedBall };
-      const { error: updateErr } = await supabase
-        .from("bonus_ball_data")
-        .update({ state: mergedState })
-        .eq("id", targetNum);
-      if (updateErr) {
-        console.error("❌ Failed to persist payment", updateErr);
+      if (!updatedBall) continue;
+      const { number, ...partial } = updatedBall;
+      const ok = await updateBallState(targetNum, partial);
+      if (!ok) {
+        console.error("❌ Failed to persist payment", targetNum);
       }
     }
     setBalls(updatedBalls);
