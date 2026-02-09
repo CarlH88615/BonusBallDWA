@@ -1,4 +1,4 @@
-
+// gitupdate 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LotteryBall } from './components/LotteryBall';
 import { supabase } from "./services/supabase";
@@ -105,23 +105,7 @@ const isAdmin = useMemo(() => {
   return sessionEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }, [sessionEmail]);
 
-  const upcomingDrawDate = useMemo(() => new Date(nextDrawRawDate), [nextDrawRawDate]);
-  const upcomingDrawDateTime = useMemo(() => {
-    const d = new Date(nextDrawRawDate);
-    d.setHours(20, 0, 0, 0);
-    return d;
-  }, [nextDrawRawDate]);
   const paidCount = useMemo(() => Object.values(managedBallData).filter(b => b.status === 'paid' || b.status === 'lifetime').length, [managedBallData]);
-  const currentPot = useMemo(() => {
-    const coveredCount = balls.reduce((acc, ball) => {
-      if (!ball.paidUntil) return acc;
-      const paidUntilDate = new Date(ball.paidUntil);
-      const normalizedPaidUntil = new Date(paidUntilDate);
-      normalizedPaidUntil.setHours(20, 0, 0, 0);
-      return normalizedPaidUntil >= upcomingDrawDateTime ? acc + 1 : acc;
-    }, 0);
-    return totalRollover + coveredCount * 2;
-  }, [balls, upcomingDrawDateTime, totalRollover]);
   const totalRaised = useMemo(() => pastResults.reduce((acc, curr) => acc + curr.charityAmount, 0), [pastResults]);
 
   const defaultNextDraw = useMemo(() => {
@@ -134,6 +118,23 @@ const isAdmin = useMemo(() => {
     return resultDate.toISOString().split('T')[0];
   }, []);
   const [nextDrawRawDate] = useState(defaultNextDraw);
+
+  const upcomingDrawDate = useMemo(() => new Date(nextDrawRawDate), [nextDrawRawDate]);
+  const upcomingDrawDateTime = useMemo(() => {
+    const d = new Date(nextDrawRawDate);
+    d.setHours(20, 0, 0, 0);
+    return d;
+  }, [nextDrawRawDate]);
+  const currentPot = useMemo(() => {
+    const coveredCount = balls.reduce((acc, ball) => {
+      if (!ball.paidUntil) return acc;
+      const paidUntilDate = new Date(ball.paidUntil);
+      const normalizedPaidUntil = new Date(paidUntilDate);
+      normalizedPaidUntil.setHours(20, 0, 0, 0);
+      return normalizedPaidUntil >= upcomingDrawDateTime ? acc + 1 : acc;
+    }, 0);
+    return totalRollover + coveredCount * 2;
+  }, [balls, upcomingDrawDateTime, totalRollover]);
 
   const formattedDrawDate = useMemo(() => {
     return new Date(nextDrawRawDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
