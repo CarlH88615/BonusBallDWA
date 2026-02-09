@@ -656,7 +656,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
   };
 
   // CORE ACTIONS
-  const commitAssignment = () => {
+  const commitAssignment = async () => {
     console.log("🧪 assign start", { selectedBall: adminAction?.ballNum, bonusBallRowId });
     if (!isAdmin) {
       console.log("🧪 assign aborted", { reason: "guard", selectedBall: adminAction?.ballNum, bonusBallRowId });
@@ -668,6 +668,16 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       return;
     }
     console.log("🧪 assign persisting");
+    const existingBall = balls.find(b => b.id === num);
+    const newState = { ...(existingBall ?? {}), owner: assignmentName.trim() };
+    const { error: assignErr } = await supabase
+      .from("bonus_ball_data")
+      .update({ state: newState })
+      .eq("id", num);
+    if (assignErr) {
+      console.error("❌ Failed to persist assignment", assignErr);
+      return;
+    }
     const updatedBalls = balls.map(b => b.number === num ? { ...b, owner: assignmentName.trim() } : b);
     setManagedBallData(prev => ({
       ...prev,
@@ -680,6 +690,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     }));
     setBalls(updatedBalls);
     console.log("✅ assign persisted");
+    setBalls(prev => prev.map(b => b.id === num ? { ...b, owner: assignmentName.trim() } : b));
     sendPush("Ball Assigned", `${assignmentName} has been assigned Ball #${num}`, "admin", "reminder");
     setAdminAction(null);
     setAssignmentName('');
