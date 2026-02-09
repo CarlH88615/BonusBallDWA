@@ -461,7 +461,6 @@ useEffect(() => {
     }
     if (event === "INITIAL_SESSION" && session && session.user) {
       loadBallsFromDb();
-      fetchBankBalance();
     }
     if (event === "SIGNED_IN" && session && session.user) {
       fetchBankBalance();
