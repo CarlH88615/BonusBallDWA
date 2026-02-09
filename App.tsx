@@ -119,6 +119,7 @@ const isAdmin = useMemo(() => {
   }, []);
   const [nextDrawRawDate] = useState(defaultNextDraw);
 
+  const upcomingDrawDate = useMemo(() => new Date(nextDrawRawDate), [nextDrawRawDate]);
   const formattedDrawDate = useMemo(() => {
     return new Date(nextDrawRawDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [nextDrawRawDate]);
