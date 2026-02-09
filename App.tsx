@@ -606,22 +606,28 @@ const loadBallsFromDb = async () => {
 
   const { data, error } = await supabase
     .from("bonus_ball_data")
-    .select("id, state")
-    .single();
+    .select("id, state");
 
   if (error) {
     console.error("❌ Failed to load bonus_ball_data", error);
     return;
   }
 
-  if (!data?.state?.balls) {
+  if (!data || data.length === 0) {
+    console.warn("⚠️ bonus_ball_data has no rows");
+    return;
+  }
+
+  const firstRow = data[0];
+
+  if (!firstRow?.state?.balls) {
     console.warn("⚠️ bonus_ball_data has no balls array");
     return;
   }
 
-  console.log("✅ Loaded balls:", data.state.balls);
-  setBonusBallRowId(data.id ?? null);
-  setBalls(data.state.balls);
+  console.log("✅ Loaded balls:", firstRow.state.balls);
+  setBonusBallRowId(firstRow.id ?? null);
+  setBalls(firstRow.state.balls);
 };
 
 // Recovery modal password update (blocking)
