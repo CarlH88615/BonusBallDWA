@@ -668,8 +668,16 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       return;
     }
     console.log("🧪 assign persisting");
-    const existingBall = balls.find(b => b.id === num);
-    const newState = { ...(existingBall ?? {}), owner: assignmentName.trim() };
+    const { data: stateRow, error: stateErr } = await supabase
+      .from("bonus_ball_data")
+      .select("state")
+      .eq("id", num)
+      .single();
+    if (stateErr) {
+      console.error("❌ Failed to load ball state for assignment", stateErr);
+      return;
+    }
+    const newState = { ...(stateRow?.state ?? {}), owner: assignmentName.trim() };
     const { error: assignErr } = await supabase
       .from("bonus_ball_data")
       .update({ state: newState })
@@ -747,16 +755,28 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
     console.log(`💾 Persisting payment for bonus_ball_data row ${bonusBallRowId}`);
     console.log(`💾 Persisting payment for ball ${num}`);
-    const { error: updateErr } = await supabase
-      .from("bonus_ball_data")
-      .update({ state: { balls: updatedBalls } })
-      .eq("id", bonusBallRowId);
-    if (updateErr) {
-      console.error("❌ Failed to persist payment", updateErr);
-    } else {
-      setBalls(updatedBalls);
-      console.log("✅ Payment persisted");
+    for (const targetNum of affectedNumbers) {
+      const updatedBall = updatedBalls.find(b => b.number === targetNum);
+      const { data: stateRow, error: stateErr } = await supabase
+        .from("bonus_ball_data")
+        .select("state")
+        .eq("id", targetNum)
+        .single();
+      if (stateErr) {
+        console.error("❌ Failed to load ball state for payment", stateErr);
+        continue;
+      }
+      const mergedState = { ...(stateRow?.state ?? {}), ...updatedBall };
+      const { error: updateErr } = await supabase
+        .from("bonus_ball_data")
+        .update({ state: mergedState })
+        .eq("id", targetNum);
+      if (updateErr) {
+        console.error("❌ Failed to persist payment", updateErr);
+      }
     }
+    setBalls(updatedBalls);
+    console.log("✅ Payment persisted");
     const paymentAmount = weeks * 2 * affectedNumbers.length;
     const { error: bankErr } = await supabase
       .from("bonus_ball_bank")
