@@ -94,6 +94,8 @@ const App: React.FC = () => {
   const [winnerRows, setWinnerRows] = useState<any[]>([]);
   const [drawDate, setDrawDate] = useState<string | null>(null);
   const [drawTimestamp, setDrawTimestamp] = useState<string | null>(null);
+  const [drawDateInput, setDrawDateInput] = useState<string>('');
+  const [drawTimeInput, setDrawTimeInput] = useState<string>('');
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -203,6 +205,35 @@ const isAdmin = useMemo(() => {
           console.log("✅ Winner recorded");
         }
       });
+  };
+  const handleUpdateDrawDate = async () => {
+    if (!isAdmin) return;
+    const datePart = drawDateInput;
+    const timePart = drawTimeInput || '20:00';
+    const isoTimestamp = datePart ? `${datePart}T${timePart}:00.000Z` : null;
+    const { error } = await supabase
+      .from("bonus_ball_config")
+      .update({ current_draw_date: datePart, current_draw_timestamp: isoTimestamp })
+      .eq("id", 1);
+    if (error) {
+      console.error("❌ Failed to update draw config", error);
+      return;
+    }
+    console.log("🔥 FETCHING bonus_ball_config");
+    const { data, error: refetchErr } = await supabase
+      .from("bonus_ball_config")
+      .select("current_draw_date, current_draw_timestamp")
+      .single();
+    if (refetchErr) {
+      console.error("❌ bonus_ball_config fetch error", refetchErr);
+      console.error("❌ Failed to load draw config", refetchErr);
+      return;
+    }
+    console.log("✅ bonus_ball_config fetched", data);
+    setDrawDate(data.current_draw_date ?? null);
+    setDrawTimestamp(data.current_draw_timestamp ?? null);
+    setDrawDateInput(data.current_draw_date ?? '');
+    setDrawTimeInput(data.current_draw_timestamp ? data.current_draw_timestamp.split('T')[1]?.slice(0,5) ?? '' : '');
   };
 
   // HANDLERS
@@ -415,6 +446,8 @@ useEffect(() => {
       console.log("✅ bonus_ball_config fetched", data);
       setDrawDate(data.current_draw_date ?? null);
       setDrawTimestamp(data.current_draw_timestamp ?? null);
+      setDrawDateInput(data.current_draw_date ?? '');
+      setDrawTimeInput(data.current_draw_timestamp ? data.current_draw_timestamp.split('T')[1]?.slice(0,5) ?? '' : '');
     });
 }, []);
 useEffect(() => {
@@ -1017,6 +1050,29 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Bank</h4>
                         <p className="text-sm font-black text-white/80">Total paid (including advance): £{totalBank}</p>
+                      </div>
+                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
+                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Update Draw Date</h4>
+                        <div className="space-y-3">
+                          <input
+                            type="date"
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white"
+                            value={drawDateInput}
+                            onChange={(e) => setDrawDateInput(e.target.value)}
+                          />
+                          <input
+                            type="time"
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white"
+                            value={drawTimeInput}
+                            onChange={(e) => setDrawTimeInput(e.target.value)}
+                          />
+                          <button
+                            onClick={handleUpdateDrawDate}
+                            className="w-full py-3 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-xl"
+                          >
+                            Save Draw Date
+                          </button>
+                        </div>
                       </div>
                       <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-[2.5rem] p-10 text-black shadow-2xl">
                          <div className="flex justify-between items-start mb-10"><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60">Revenue</p><h4 className="text-4xl font-black tracking-tighter leading-none">{paidCount > 0 ? 'Active' : 'Growth'}</h4></div><div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></div></div>
