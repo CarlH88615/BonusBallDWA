@@ -91,6 +91,7 @@ const App: React.FC = () => {
   const [applyToAllOwner, setApplyToAllOwner] = useState(false);
   const [rolloverAmount, setRolloverAmount] = useState(0);
   const [selectedResultBall, setSelectedResultBall] = useState<number | null>(null);
+  const [winnerRows, setWinnerRows] = useState<any[]>([]);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -401,6 +402,19 @@ useEffect(() => {
   });
 
   return () => sub.subscription.unsubscribe();
+}, []);
+useEffect(() => {
+  supabase
+    .from("bonus_ball_winners")
+    .select("*")
+    .order("draw_date", { ascending: false })
+    .then(({ data, error }) => {
+      if (error) {
+        console.error("❌ Failed to load winners", error);
+        return;
+      }
+      setWinnerRows(data ?? []);
+    });
 }, []);
 
 const handleForgotPassword = async (e: React.FormEvent) => {
@@ -837,23 +851,23 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
               {activeTab === 'winners' && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-500 max-w-4xl mx-auto space-y-8">
-                  <div className="text-center mb-12">
-                    <h3 className="text-5xl font-black text-white tracking-tighter mb-2">Hall of Fame</h3>
-                    <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">Celebrating our lucky champions</p>
-                  </div>
-                  <div className="space-y-4">
-                    {pastResults.length === 0 ? (
-                      <div className="text-center py-20 opacity-20"><p className="font-black uppercase tracking-widest">No results yet</p></div>
-                    ) : pastResults.map((r, i) => (
-                      <div key={i} className="bg-white/[0.03] backdrop-blur-xl border border-white/10 p-8 rounded-[2rem] flex items-center gap-10 hover:bg-white/5 transition-all group">
-                        <LotteryBall number={r.ballNumber} className="w-20 h-20 group-hover:rotate-12 transition-transform" />
-                        <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                          <div><p className="text-[10px] font-black uppercase text-pink-500 tracking-widest mb-1">{r.date}</p><h4 className="text-3xl font-black text-white tracking-tighter leading-none">{r.winner}</h4></div>
-                          <div className="text-right"><p className="text-[10px] font-black uppercase text-white/30 mb-1">Awarded</p><p className="text-3xl font-black text-yellow-500 tracking-tighter">£{r.prizeAmount || r.charityAmount}</p></div>
+                   <div className="text-center mb-12">
+                     <h3 className="text-5xl font-black text-white tracking-tighter mb-2">Hall of Fame</h3>
+                     <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">Celebrating our lucky champions</p>
+                   </div>
+                   <div className="space-y-4">
+                      {winnerRows.length === 0 ? (
+                        <div className="text-center py-20 opacity-20"><p className="font-black uppercase tracking-widest">No results yet</p></div>
+                      ) : winnerRows.map((r, i) => (
+                        <div key={i} className="bg-white/[0.03] backdrop-blur-xl border border-white/10 p-8 rounded-[2rem] flex items-center gap-10 hover:bg-white/5 transition-all group">
+                          <LotteryBall number={r.winning_number} className="w-20 h-20 group-hover:rotate-12 transition-transform" />
+                          <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div><p className="text-[10px] font-black uppercase text-pink-500 tracking-widest mb-1">{r.draw_date}</p><h4 className="text-3xl font-black text-white tracking-tighter leading-none">{r.winner_name ?? 'VACANT'}</h4></div>
+                            <div className="text-right"><p className="text-[10px] font-black uppercase text-white/30 mb-1">Awarded</p><p className="text-3xl font-black text-yellow-500 tracking-tighter">£{r.amount_won}</p></div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
                 </div>
               )}
 
