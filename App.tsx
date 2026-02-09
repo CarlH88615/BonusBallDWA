@@ -184,7 +184,7 @@ const isAdmin = useMemo(() => {
     const drawTimestamp = upcomingDrawDateTime.toISOString();
     const amountWon = hasOwner ? currentPot : currentPot / 2;
     const rolloverPersist = hasOwner ? 0 : currentPot / 2;
-    const winnerName = ball?.owner ?? null;
+      const winnerName = ball?.owner ?? null;
     supabase
       .from("bonus_ball_winners")
       .insert([
@@ -203,6 +203,17 @@ const isAdmin = useMemo(() => {
           console.error("❌ Failed to record winner", error);
         } else {
           console.log("✅ Winner recorded");
+          supabase
+            .from("bonus_ball_winners")
+            .select("*")
+            .order("draw_date", { ascending: false })
+            .then(({ data, error: fetchErr }) => {
+              if (fetchErr) {
+                console.error("❌ Failed to load winners", fetchErr);
+                return;
+              }
+              setWinnerRows(data ?? []);
+            });
         }
       });
   };
@@ -451,17 +462,27 @@ useEffect(() => {
     });
 }, []);
 useEffect(() => {
-  supabase
-    .from("bonus_ball_winners")
-    .select("*")
-    .order("draw_date", { ascending: false })
-    .then(({ data, error }) => {
-      if (error) {
-        console.error("❌ Failed to load winners", error);
-        return;
-      }
-      setWinnerRows(data ?? []);
-    });
+  const fetchWinners = () => {
+    supabase
+      .from("bonus_ball_winners")
+      .select("*")
+      .order("draw_date", { ascending: false })
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("❌ Failed to load winners", error);
+          return;
+        }
+        setWinnerRows(data ?? []);
+      });
+  };
+  fetchWinners();
+  const channel = supabase
+    .channel('winners-refresh')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bonus_ball_winners' }, fetchWinners)
+    .subscribe();
+  return () => {
+    channel.unsubscribe();
+  };
 }, []);
 
 const handleForgotPassword = async (e: React.FormEvent) => {
