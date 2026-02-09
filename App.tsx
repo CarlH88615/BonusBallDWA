@@ -96,6 +96,7 @@ const App: React.FC = () => {
   const [drawTimestamp, setDrawTimestamp] = useState<string | null>(null);
   const [drawDateInput, setDrawDateInput] = useState<string>('');
   const [drawTimeInput, setDrawTimeInput] = useState<string>('');
+  const [bankBalance, setBankBalance] = useState<number>(0);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -459,6 +460,21 @@ useEffect(() => {
       setDrawTimestamp(data.current_draw_timestamp ?? null);
       setDrawDateInput(data.current_draw_date ?? '');
       setDrawTimeInput(data.current_draw_timestamp ? data.current_draw_timestamp.split('T')[1]?.slice(0,5) ?? '' : '');
+    });
+}, []);
+useEffect(() => {
+  console.log("🔥 FETCHING bonus_ball_bank");
+  supabase
+    .from("bonus_ball_bank")
+    .select("balance")
+    .single()
+    .then(({ data, error }) => {
+      if (error) {
+        console.error("❌ Failed to load bank", error);
+        return;
+      }
+      console.log("✅ bonus_ball_bank fetched", data);
+      setBankBalance(data?.balance ?? 0);
     });
 }, []);
 useEffect(() => {
@@ -1070,7 +1086,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       </div>
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Bank</h4>
-                        <p className="text-sm font-black text-white/80">Total paid (including advance): £{totalBank}</p>
+                        <p className="text-sm font-black text-white/80">Total paid (including advance): £{bankBalance}</p>
                       </div>
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Update Draw Date</h4>
