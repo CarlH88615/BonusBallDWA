@@ -89,6 +89,8 @@ const App: React.FC = () => {
   const [bonusBallRowId, setBonusBallRowId] = useState<string | null>(null);
   const [showNotCoveredOnly, setShowNotCoveredOnly] = useState(false);
   const [applyToAllOwner, setApplyToAllOwner] = useState(false);
+  const [rolloverAmount, setRolloverAmount] = useState(0);
+  const [selectedResultBall, setSelectedResultBall] = useState<number | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -166,6 +168,19 @@ const isAdmin = useMemo(() => {
   }, [balls, drawDateTime]);
 
   const latestWin = pastResults.length > 0 ? pastResults[0] : null;
+  const handleRecordResult = () => {
+    if (!selectedResultBall) return;
+    const ball = balls.find(b => b.number === selectedResultBall);
+    const hasOwner = !!ball?.owner;
+    if (hasOwner) {
+      setTotalRollover(0);
+      setRolloverAmount(0);
+    } else {
+      const newRollover = currentPot / 2;
+      setTotalRollover(newRollover);
+      setRolloverAmount(newRollover);
+    }
+  };
 
   // HANDLERS
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -922,6 +937,28 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             Send Test Push (Real)
                           </button>
 
+                        </div>
+                      </div>
+                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
+                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Record Result</h4>
+                        <div className="space-y-4">
+                          <select
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-sm"
+                            value={selectedResultBall ?? ''}
+                            onChange={(e) => setSelectedResultBall(e.target.value ? Number(e.target.value) : null)}
+                          >
+                            <option value="">Select ball</option>
+                            {balls.map(b => (
+                              <option key={b.number} value={b.number}>{b.number} {b.owner ? `- ${b.owner}` : '- Vacant'}</option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={handleRecordResult}
+                            className="w-full py-4 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-xl"
+                          >
+                            Record Result
+                          </button>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Rollover: £{rolloverAmount}</p>
                         </div>
                       </div>
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
