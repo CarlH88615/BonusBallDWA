@@ -618,16 +618,20 @@ const loadBallsFromDb = async () => {
     return;
   }
 
-  const firstRow = data[0];
+  const aggregatedBalls = data.flatMap((row: any) => {
+    if (row?.state?.balls) return row.state.balls;
+    if (row?.state) return [row.state];
+    return [];
+  });
 
-  if (!firstRow?.state?.balls) {
-    console.warn("⚠️ bonus_ball_data has no balls array");
+  if (aggregatedBalls.length === 0) {
+    console.warn("⚠️ bonus_ball_data contained rows but no balls were found");
     return;
   }
 
-  console.log("✅ Loaded balls:", firstRow.state.balls);
-  setBonusBallRowId(firstRow.id ?? null);
-  setBalls(firstRow.state.balls);
+  console.log("✅ Loaded balls:", aggregatedBalls);
+  setBonusBallRowId(data[0]?.id ?? null);
+  setBalls(aggregatedBalls);
 };
 
 // Recovery modal password update (blocking)
