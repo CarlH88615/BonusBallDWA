@@ -408,9 +408,17 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
   // CORE ACTIONS
   const commitAssignment = () => {
-    if (!isAdmin) return;
+    console.log("🧪 assign start", { selectedBall: adminAction?.ballNum, bonusBallRowId });
+    if (!isAdmin) {
+      console.log("🧪 assign aborted", { reason: "guard", selectedBall: adminAction?.ballNum, bonusBallRowId });
+      return;
+    }
     const num = adminAction?.ballNum;
-    if (!num || !assignmentName.trim()) return;
+    if (!num || !assignmentName.trim()) {
+      console.log("🧪 assign aborted", { reason: "guard", selectedBall: adminAction?.ballNum, bonusBallRowId });
+      return;
+    }
+    console.log("🧪 assign persisting");
     setManagedBallData(prev => ({
       ...prev,
       [num]: {
@@ -420,6 +428,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
         nextDue: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
       }
     }));
+    console.log("✅ assign persisted");
     sendPush("Ball Assigned", `${assignmentName} has been assigned Ball #${num}`, "admin", "reminder");
     setAdminAction(null);
     setAssignmentName('');
