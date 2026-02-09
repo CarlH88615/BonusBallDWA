@@ -257,7 +257,7 @@ const isAdmin = useMemo(() => {
     if (!confirm("This cannot be undone. Proceed with hard reset?")) return;
     setIsResetting(true);
     try {
-      const winnerDelete = await supabase.from("bonus_ball_winners").delete().neq("id", -1);
+      const winnerDelete = await supabase.from("bonus_ball_winners").delete().not("id", "is", null);
       if (winnerDelete.error) throw winnerDelete.error;
 
       const bankReset = await supabase.from("bonus_ball_bank").update({ balance: 0 }).eq("id", 1).single();
