@@ -112,6 +112,8 @@ const App: React.FC = () => {
         setBankBalance(data?.balance ?? 0);
       });
   };
+  const [resetPin, setResetPin] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -245,6 +247,47 @@ const isAdmin = useMemo(() => {
             });
         }
       });
+  };
+  const handleHardReset = async () => {
+    if (!isAdmin) return;
+    if (resetPin !== "1234") {
+      alert("Incorrect PIN");
+      return;
+    }
+    if (!confirm("This cannot be undone. Proceed with hard reset?")) return;
+    setIsResetting(true);
+    try {
+      const winnerDelete = await supabase.from("bonus_ball_winners").delete().neq("id", -1);
+      if (winnerDelete.error) throw winnerDelete.error;
+
+      const bankReset = await supabase.from("bonus_ball_bank").update({ balance: 0 }).eq("id", 1).single();
+      if (bankReset.error) throw bankReset.error;
+
+      const targetId = bonusBallRowId ?? 1;
+      const ballsReset = await supabase
+        .from("bonus_ball_data")
+        .update({ state: { balls: [] } })
+        .eq("id", targetId)
+        .single();
+      if (ballsReset.error) throw ballsReset.error;
+
+      setBalls([]);
+      setManagedBallData({});
+      setPastResults([]);
+      setTotalRollover(0);
+      setRolloverAmount(0);
+      setSelectedBallNum(null);
+      setWinnerRows([]);
+      setBankBalance(bankReset.data?.balance ?? 0);
+      fetchBankBalance();
+      loadBallsFromDb();
+    } catch (err) {
+      console.error("❌ Hard reset failed", err);
+      alert("Reset failed. Check console for details.");
+    } finally {
+      setIsResetting(false);
+      setResetPin('');
+    }
   };
   const handleUpdateDrawDate = async () => {
     if (!isAdmin) return;
@@ -1135,6 +1178,24 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Bank</h4>
                         <p className="text-sm font-black text-white/80">Balance: £{bankBalance}</p>
+                      </div>
+                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
+                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6 text-left">Hard Reset</h4>
+                        <p className="text-sm text-red-400 font-black uppercase mb-3">This cannot be undone</p>
+                        <input
+                          type="password"
+                          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white mb-3"
+                          placeholder="Enter PIN 1234"
+                          value={resetPin}
+                          onChange={(e) => setResetPin(e.target.value)}
+                        />
+                        <button
+                          disabled={isResetting}
+                          onClick={handleHardReset}
+                          className="w-full py-3 bg-red-600 text-white font-black uppercase text-xs tracking-widest rounded-xl disabled:opacity-50"
+                        >
+                          {isResetting ? 'Resetting...' : 'Hard Reset'}
+                        </button>
                       </div>
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Update Draw Date</h4>
