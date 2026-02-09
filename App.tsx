@@ -188,18 +188,19 @@ const isAdmin = useMemo(() => {
     if (!selectedResultBall) return;
     const ball = balls.find(b => b.number === selectedResultBall);
     const hasOwner = !!ball?.owner;
+    const paidThisDraw = currentPot - totalRollover;
     if (hasOwner) {
       setTotalRollover(0);
       setRolloverAmount(0);
     } else {
-      const newRollover = currentPot / 2;
+      const newRollover = totalRollover + paidThisDraw / 2;
       setTotalRollover(newRollover);
       setRolloverAmount(newRollover);
     }
     const drawDate = upcomingDrawDateTime.toISOString().split('T')[0];
     const drawTimestamp = upcomingDrawDateTime.toISOString();
-    const amountWon = hasOwner ? currentPot : currentPot / 2;
-    const rolloverPersist = hasOwner ? 0 : currentPot / 2;
+    const amountWon = hasOwner ? currentPot : paidThisDraw / 2;
+    const rolloverPersist = hasOwner ? 0 : totalRollover + paidThisDraw / 2;
       const winnerName = ball?.owner ?? null;
     supabase
       .from("bonus_ball_winners")
