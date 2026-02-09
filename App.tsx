@@ -1076,6 +1076,44 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     </button>
                   </div>
                 )}
+                {adminAction.type === "result" && (
+                  <div className="space-y-4 text-center">
+                    <h4 className="text-xl font-black text-white uppercase">Record Draw Result</h4>
+                    <p className="text-white/60 text-sm">
+                      Winning Ball: {selectedResultBall ?? 'None selected'}
+                    </p>
+                    <p className="text-white/50 text-xs">
+                      Status: {(() => {
+                        const ball = balls.find(b => b.number === selectedResultBall);
+                        return ball?.owner ? 'Assigned' : 'Unassigned';
+                      })()}
+                    </p>
+                    <select
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-sm"
+                      value={selectedResultBall ?? ''}
+                      onChange={(e) => setSelectedResultBall(e.target.value ? Number(e.target.value) : null)}
+                    >
+                      <option value="">Select ball</option>
+                      {balls.map(b => (
+                        <option key={b.number} value={b.number}>{b.number} {b.owner ? `- ${b.owner}` : '- Vacant'}</option>
+                      ))}
+                    </select>
+                    <div className="flex gap-3 justify-center">
+                      <button
+                        onClick={() => { handleRecordResult(); setAdminAction(null); }}
+                        className="flex-1 py-3 bg-pink-500 text-black font-black uppercase text-xs rounded-xl"
+                      >
+                        Confirm Result
+                      </button>
+                      <button
+                        onClick={() => setAdminAction(null)}
+                        className="flex-1 py-3 bg-white/10 text-white font-black uppercase text-xs rounded-xl"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
