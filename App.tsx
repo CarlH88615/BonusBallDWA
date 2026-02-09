@@ -87,6 +87,7 @@ const App: React.FC = () => {
   const [isTransmitting, setIsTransmitting] = useState(false);
   const [balls, setBalls] = useState<any[]>([]);
   const [bonusBallRowId, setBonusBallRowId] = useState<string | null>(null);
+  const [showNotCoveredOnly, setShowNotCoveredOnly] = useState(false);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -764,7 +765,18 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <div className="flex items-center justify-between mb-8">
                           <h4 className="text-2xl font-black text-white uppercase tracking-tighter">Directory Control</h4>
-                          <input type="text" placeholder="Search..." className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-pink-500" value={adminSearchTerm} onChange={(e) => setAdminSearchTerm(e.target.value)} />
+                          <div className="flex items-center gap-3">
+                            <label className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/40">
+                              <input
+                                type="checkbox"
+                                className="accent-pink-500"
+                                checked={showNotCoveredOnly}
+                                onChange={(e) => setShowNotCoveredOnly(e.target.checked)}
+                              />
+                              Show not covered for next draw
+                            </label>
+                            <input type="text" placeholder="Search..." className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-pink-500" value={adminSearchTerm} onChange={(e) => setAdminSearchTerm(e.target.value)} />
+                          </div>
                         </div>
                         <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                           {balls.map((ball) => {
@@ -776,11 +788,13 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             const nextDueLabel = nextDueDate
                               ? nextDueDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', '')
                               : 'N/A';
+                            const notCovered = !ball.paidUntil || (upcomingDrawDate && new Date(ball.paidUntil) < new Date(upcomingDrawDate));
                             const matchesSearch =
                               !adminSearchTerm ||
                               num.toString().includes(adminSearchTerm) ||
                               (ownerName && ownerName.toLowerCase().includes(adminSearchTerm.toLowerCase()));
                             if (!matchesSearch) return null;
+                            if (showNotCoveredOnly && !notCovered) return null;
                             return (
                               <div key={num} className="bg-white/[0.02] border border-white/5 p-4 rounded-2xl flex items-center justify-between hover:bg-white/[0.05] transition-all">
                                 <div className="flex items-center gap-4">
