@@ -419,6 +419,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       return;
     }
     console.log("🧪 assign persisting");
+    const updatedBalls = balls.map(b => b.number === num ? { ...b, owner: assignmentName.trim() } : b);
     setManagedBallData(prev => ({
       ...prev,
       [num]: {
@@ -428,6 +429,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
         nextDue: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
       }
     }));
+    setBalls(updatedBalls);
     console.log("✅ assign persisted");
     sendPush("Ball Assigned", `${assignmentName} has been assigned Ball #${num}`, "admin", "reminder");
     setAdminAction(null);
