@@ -459,8 +459,12 @@ useEffect(() => {
     if (event === "PASSWORD_RECOVERY") {
       setAuthMode("reset");
     }
-    if (event === "INITIAL_SESSION" && session) {
+    if (event === "INITIAL_SESSION" && session && session.user) {
       loadBallsFromDb();
+      fetchBankBalance();
+    }
+    if (event === "SIGNED_IN" && session && session.user) {
+      fetchBankBalance();
     }
 
     const recoveryFlag = Boolean((session?.user as any)?.recovery_sent_at);
