@@ -401,15 +401,18 @@ useEffect(() => {
   return () => sub.subscription.unsubscribe();
 }, []);
 useEffect(() => {
+  console.log("🔥 FETCHING bonus_ball_config");
   supabase
     .from("bonus_ball_config")
     .select("current_draw_date, current_draw_timestamp")
     .single()
     .then(({ data, error }) => {
       if (error) {
+        console.error("❌ bonus_ball_config fetch error", error);
         console.error("❌ Failed to load draw config", error);
         return;
       }
+      console.log("✅ bonus_ball_config fetched", data);
       setDrawDate(data.current_draw_date ?? null);
       setDrawTimestamp(data.current_draw_timestamp ?? null);
     });
