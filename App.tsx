@@ -498,7 +498,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       const startDate = existingPaidUntil && existingPaidUntil > saturday ? existingPaidUntil : saturday;
       const newPaidUntilDate = new Date(startDate);
       newPaidUntilDate.setDate(newPaidUntilDate.getDate() + (weeks * 7));
-      const formattedPaidUntil = newPaidUntilDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', '');
+      const formattedPaidUntil = newPaidUntilDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: '2-digit' }).replace(',', '');
       return { ...ball, paidUntil: formattedPaidUntil };
     });
 
