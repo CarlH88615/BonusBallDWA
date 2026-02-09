@@ -180,6 +180,31 @@ const isAdmin = useMemo(() => {
       setTotalRollover(newRollover);
       setRolloverAmount(newRollover);
     }
+    const drawDate = upcomingDrawDateTime.toISOString().split('T')[0];
+    const drawTimestamp = upcomingDrawDateTime.toISOString();
+    const amountWon = hasOwner ? currentPot : currentPot / 2;
+    const rolloverPersist = hasOwner ? 0 : currentPot / 2;
+    const winnerName = ball?.owner ?? null;
+    supabase
+      .from("bonus_ball_winners")
+      .insert([
+        {
+          draw_date: drawDate,
+          draw_timestamp: drawTimestamp,
+          winning_number: selectedResultBall,
+          winner_name: winnerName,
+          winner_user_id: null,
+          amount_won: amountWon,
+          rollover_amount: rolloverPersist,
+        },
+      ])
+      .then(({ error }) => {
+        if (error) {
+          console.error("❌ Failed to record winner", error);
+        } else {
+          console.log("✅ Winner recorded");
+        }
+      });
   };
 
   // HANDLERS
