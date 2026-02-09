@@ -618,11 +618,7 @@ const loadBallsFromDb = async () => {
     return;
   }
 
-  const aggregatedBalls = data.flatMap((row: any) => {
-    if (row?.state?.balls) return row.state.balls;
-    if (row?.state) return [row.state];
-    return [];
-  });
+  const aggregatedBalls = data.map((row: any) => ({ id: row.id, ...(row.state ?? {}) }));
 
   if (aggregatedBalls.length === 0) {
     console.warn("⚠️ bonus_ball_data contained rows but no balls were found");
