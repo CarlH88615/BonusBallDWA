@@ -204,6 +204,20 @@ const isAdmin = useMemo(() => {
           console.error("❌ Failed to record winner", error);
         } else {
           console.log("✅ Winner recorded");
+          const bankDelta = hasOwner ? -currentPot : -(currentPot / 2);
+          supabase
+            .from("bonus_ball_bank")
+            .update({ balance: (bankBalance ?? 0) + bankDelta })
+            .eq("id", 1)
+            .select("balance")
+            .single()
+            .then(({ data: bankData, error: bankErr }) => {
+              if (bankErr) {
+                console.error("❌ Failed to update bank balance", bankErr);
+              } else {
+                setBankBalance(bankData?.balance ?? bankBalance);
+              }
+            });
           supabase
             .from("bonus_ball_winners")
             .select("*")
@@ -678,6 +692,18 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       setBalls(updatedBalls);
       console.log("✅ Payment persisted");
     }
+    const paymentAmount = weeks * 2 * affectedNumbers.length;
+    const { data: bankData, error: bankErr } = await supabase
+      .from("bonus_ball_bank")
+      .update({ balance: (bankBalance ?? 0) + paymentAmount })
+      .eq("id", 1)
+      .select("balance")
+      .single();
+    if (bankErr) {
+      console.error("❌ Failed to update bank balance", bankErr);
+    } else {
+      setBankBalance(bankData?.balance ?? bankBalance);
+    }
 
     sendPush("Payment Logged", `Received payment for Ball #${num} (${weeks} week${weeks > 1 ? 's' : ''})`, "admin", "reminder");
     setAdminAction(null);
@@ -1086,7 +1112,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       </div>
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Bank</h4>
-                        <p className="text-sm font-black text-white/80">Total paid (including advance): £{bankBalance}</p>
+                        <p className="text-sm font-black text-white/80">Balance: £{bankBalance}</p>
                       </div>
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Update Draw Date</h4>
