@@ -750,9 +750,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     const { error: updateErr } = await supabase
       .from("bonus_ball_data")
       .update({ state: { balls: updatedBalls } })
-      .eq("id", bonusBallRowId)
-      .select()
-      .single();
+      .eq("id", bonusBallRowId);
     if (updateErr) {
       console.error("❌ Failed to persist payment", updateErr);
     } else {
