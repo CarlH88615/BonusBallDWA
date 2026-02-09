@@ -105,6 +105,12 @@ const isAdmin = useMemo(() => {
   return sessionEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }, [sessionEmail]);
 
+  const upcomingDrawDate = useMemo(() => new Date(nextDrawRawDate), [nextDrawRawDate]);
+  const upcomingDrawDateTime = useMemo(() => {
+    const d = new Date(nextDrawRawDate);
+    d.setHours(20, 0, 0, 0);
+    return d;
+  }, [nextDrawRawDate]);
   const paidCount = useMemo(() => Object.values(managedBallData).filter(b => b.status === 'paid' || b.status === 'lifetime').length, [managedBallData]);
   const currentPot = useMemo(() => {
     const coveredCount = balls.reduce((acc, ball) => {
@@ -129,12 +135,6 @@ const isAdmin = useMemo(() => {
   }, []);
   const [nextDrawRawDate] = useState(defaultNextDraw);
 
-  const upcomingDrawDate = useMemo(() => new Date(nextDrawRawDate), [nextDrawRawDate]);
-  const upcomingDrawDateTime = useMemo(() => {
-    const d = new Date(nextDrawRawDate);
-    d.setHours(20, 0, 0, 0);
-    return d;
-  }, [nextDrawRawDate]);
   const formattedDrawDate = useMemo(() => {
     return new Date(nextDrawRawDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [nextDrawRawDate]);
