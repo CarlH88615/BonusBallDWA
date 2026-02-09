@@ -131,17 +131,24 @@ const isAdmin = useMemo(() => {
     sat.setDate(today.getDate() - ((today.getDay() + 1) % 7));
     return sat;
   }, []);
+  const drawDateTime = useMemo(() => {
+    const today = new Date();
+    const sat = new Date(today);
+    sat.setHours(20, 0, 0, 0);
+    sat.setDate(today.getDate() - ((today.getDay() + 1) % 7));
+    return sat;
+  }, []);
   const totalBank = useMemo(() => {
     const weekMs = 7 * 24 * 60 * 60 * 1000;
     return balls.reduce((sum, ball) => {
       if (!ball.paidUntil) return sum;
       const paidUntilDate = new Date(ball.paidUntil);
-      if (paidUntilDate < baselineSaturday) return sum;
-      const weeksPaid = Math.floor((paidUntilDate.getTime() - baselineSaturday.getTime()) / weekMs) + 1;
+      if (paidUntilDate < drawDateTime) return sum;
+      const weeksPaid = Math.floor((paidUntilDate.getTime() - drawDateTime.getTime()) / weekMs) + 1;
       const ballAmount = weeksPaid * 2;
       return sum + ballAmount;
     }, 0);
-  }, [balls, baselineSaturday]);
+  }, [balls, drawDateTime]);
 
   const latestWin = pastResults.length > 0 ? pastResults[0] : null;
 
