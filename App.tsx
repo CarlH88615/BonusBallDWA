@@ -1128,13 +1128,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             const num = ball.number;
                             const ownerName = ball?.owner;
                             const isPaid = isBallPaidForDraw(ball);
-                            const nextDueDate = ball.paidUntil
-                              ? new Date(new Date(ball.paidUntil).getTime() + 7 * 24 * 60 * 60 * 1000)
-                              : null;
-                            const nextDueLabel = nextDueDate
-                              ? nextDueDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', '')
-                              : 'N/A';
-                            const notCovered = !ball.paidUntil || (upcomingDrawDate && new Date(ball.paidUntil) < new Date(upcomingDrawDate));
+                            const notCovered = !isPaid;
                             const matchesSearch =
                               !adminSearchTerm ||
                               num.toString().includes(adminSearchTerm) ||
