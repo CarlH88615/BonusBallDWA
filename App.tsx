@@ -258,6 +258,16 @@ const isAdmin = useMemo(() => {
     if (!confirm("This cannot be undone. Proceed with hard reset?")) return;
     setIsResetting(true);
     try {
+      // build fresh canonical ball set
+      const freshBalls = Array.from({ length: 59 }, (_, i) => ({
+        number: i + 1,
+        ownerName: null,
+        owner: null,
+        userId: null,
+        email: null,
+        paidUntil: null,
+      }));
+
       const winnerDelete = await supabase.from("bonus_ball_winners").delete().not("id", "is", null);
       if (winnerDelete.error) throw winnerDelete.error;
 
@@ -267,12 +277,12 @@ const isAdmin = useMemo(() => {
       const targetId = bonusBallRowId ?? 1;
       const ballsReset = await supabase
         .from("bonus_ball_data")
-        .update({ state: { balls: [] } })
+        .update({ state: { balls: freshBalls } })
         .eq("id", targetId)
         .single();
       if (ballsReset.error) throw ballsReset.error;
 
-      setBalls([]);
+      setBalls(freshBalls);
       setManagedBallData({});
       setPastResults([]);
       setTotalRollover(0);
