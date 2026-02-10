@@ -853,6 +853,13 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
   const hasUnread = notifications.some(n => !n.read);
   const selectedBall = balls.find(b => b.number === selectedBallNum);
+  const isBallPaidForDraw = (ball: any) => {
+    if (!ball?.paidUntil || !upcomingDrawDateTime) return false;
+    const paidDate = new Date(ball.paidUntil);
+    const normalized = new Date(paidDate);
+    normalized.setHours(20, 0, 0, 0);
+    return normalized >= upcomingDrawDateTime;
+  };
 
   return (
     <div className="relative min-h-screen bg-[#020407] overflow-hidden flex flex-col font-display">
@@ -1050,10 +1057,22 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       {balls.map((ball) => {
                         const num = ball.number;
                         const ownerName = ball?.owner;
+                        const isPaid = isBallPaidForDraw(ball);
                         return (
                           <div key={num} onClick={() => setSelectedBallNum(num)} className="group cursor-pointer transition-all flex flex-col items-center gap-2">
-                            <LotteryBall number={num} className="w-full group-hover:scale-110 transition-transform" opacity={ownerName ? 1 : 0.1} />
-                            <p className={`text-[8px] font-black uppercase truncate w-full text-center mt-1 transition-colors ${ownerName ? 'text-white/40' : 'text-white/10'}`}>{ownerName ?? 'Open'}</p>
+                            <LotteryBall number={num} className="w-full group-hover:scale-110 transition-transform" opacity={isPaid ? 1 : 0.1} />
+                            <p className={`text-[8px] font-black uppercase truncate w-full text-center mt-1 transition-colors ${isPaid ? 'text-white/80' : 'text-white/20'}`}>
+                              {ownerName
+                                ? <>
+                                    {ownerName}{!isPaid && ' ⚠️'}
+                                  </>
+                                : (!isPaid ? 'Open ⚠️' : 'Open')}
+                            </p>
+                            <p className="text-[8px] font-bold uppercase text-center text-white/30">
+                              {isPaid
+                                ? `Paid until and including ${ball.paidUntil}`
+                                : 'Unpaid for next draw'}
+                            </p>
                           </div>
                         );
                       })}
@@ -1108,6 +1127,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         {balls.map((ball) => {
                             const num = ball.number;
                             const ownerName = ball?.owner;
+                            const isPaid = isBallPaidForDraw(ball);
                             const nextDueDate = ball.paidUntil
                               ? new Date(new Date(ball.paidUntil).getTime() + 7 * 24 * 60 * 60 * 1000)
                               : null;
@@ -1124,10 +1144,14 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             return (
                               <div key={num} className="bg-white/[0.02] border border-white/5 p-4 rounded-2xl flex items-center justify-between hover:bg-white/[0.05] transition-all">
                                 <div className="flex items-center gap-4">
-                                  <LotteryBall number={num} className="w-10 h-10" opacity={ownerName ? 1 : 0.2} />
+                                  <LotteryBall number={num} className="w-10 h-10" opacity={isPaid ? 1 : 0.2} />
                                   <div>
-                                    <p className="text-sm font-black text-white leading-none">{ownerName ?? `Vacant Ball #${num}`}</p>
-                                    <p className="text-[9px] font-bold uppercase mt-1 text-white/30">{ownerName ? `Due: ${nextDueLabel}` : 'Available'}</p>
+                                    <p className="text-sm font-black text-white leading-none">
+                                      {ownerName ?? `Vacant Ball #${num}`}{!isPaid && ' ⚠️'}
+                                    </p>
+                                    <p className="text-[9px] font-bold uppercase mt-1 text-white/30">
+                                      {isPaid ? `Paid until and including ${ball.paidUntil}` : 'Unpaid for next draw'}
+                                    </p>
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-3">
@@ -1427,8 +1451,15 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
               <LotteryBall number={selectedBallNum} className="w-56 h-56 mx-auto mb-8" />
               {selectedBall && (
                 <div className="space-y-2 text-white">
-                  <p className="text-lg font-black">{selectedBall.owner ?? 'Unassigned'}</p>
-                  <p className="text-sm text-white/70">Paid until and including {selectedBall.paidUntil}</p>
+                  <p className="text-lg font-black">
+                    {selectedBall.owner ?? 'Unassigned'}
+                    {!isBallPaidForDraw(selectedBall) && ' ⚠️'}
+                  </p>
+                  <p className="text-sm text-white/70">
+                    {isBallPaidForDraw(selectedBall)
+                      ? `Paid until and including ${selectedBall.paidUntil}`
+                      : 'Unpaid for next draw'}
+                  </p>
                 </div>
               )}
             </div>
