@@ -190,9 +190,16 @@ const isAdmin = useMemo(() => {
   const handleRecordResult = () => {
     if (!selectedResultBall) return;
     const ball = balls.find(b => b.number === selectedResultBall);
-    const hasOwner = !!ball?.owner;
+    const isPaidWinner = (() => {
+      if (!ball?.owner) return false;
+      if (!ball?.paidUntil || !upcomingDrawDateTime) return false;
+      const paidDate = new Date(ball.paidUntil);
+      const normalized = new Date(paidDate);
+      normalized.setHours(20, 0, 0, 0);
+      return normalized >= upcomingDrawDateTime;
+    })();
     const paidThisDraw = currentPot - totalRollover;
-    if (hasOwner) {
+    if (isPaidWinner) {
       setTotalRollover(0);
       setRolloverAmount(0);
     } else {
@@ -202,8 +209,8 @@ const isAdmin = useMemo(() => {
     }
     const drawDate = upcomingDrawDateTime.toISOString().split('T')[0];
     const drawTimestamp = upcomingDrawDateTime.toISOString();
-    const amountWon = hasOwner ? currentPot : paidThisDraw / 2;
-    const rolloverPersist = hasOwner ? 0 : totalRollover + paidThisDraw / 2;
+    const amountWon = isPaidWinner ? currentPot : paidThisDraw / 2;
+    const rolloverPersist = isPaidWinner ? 0 : totalRollover + paidThisDraw / 2;
       const winnerName = ball?.owner ?? null;
     supabase
       .from("bonus_ball_winners")
@@ -223,7 +230,7 @@ const isAdmin = useMemo(() => {
           console.error("❌ Failed to record winner", error);
         } else {
           console.log("✅ Winner recorded");
-          const bankDelta = hasOwner ? -currentPot : -(currentPot / 2);
+          const bankDelta = isPaidWinner ? -currentPot : -(paidThisDraw / 2);
           supabase
             .from("bonus_ball_bank")
             .update({ balance: (bankBalance ?? 0) + bankDelta })
