@@ -268,10 +268,17 @@ const isAdmin = useMemo(() => {
         paidUntil: null,
       }));
 
-      const winnerDelete = await supabase.from("bonus_ball_winners").delete().not("id", "is", null);
+      const winnerDelete = await supabase
+        .from("bonus_ball_winners")
+        .delete()
+        .not("id", "is", null);
       if (winnerDelete.error) throw winnerDelete.error;
 
-      const bankReset = await supabase.from("bonus_ball_bank").update({ balance: 0 }).eq("id", 1).single();
+      const bankReset = await supabase
+        .from("bonus_ball_bank")
+        .update({ balance: 0 })
+        .eq("id", 1)
+        .single();
       if (bankReset.error) throw bankReset.error;
 
       const targetId = bonusBallRowId ?? 1;
