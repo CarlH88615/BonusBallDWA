@@ -112,28 +112,7 @@ const App: React.FC = () => {
         setBankBalance(data?.balance ?? 0);
       });
   };
-  const updateBallState = async (ballId: number, partial: Record<string, any>, options?: { replace?: boolean }) => {
-    const replace = options?.replace ?? false;
-    const { data: stateRow, error: stateErr } = await supabase
-      .from("bonus_ball_data")
-      .select("state")
-      .eq("id", ballId)
-      .single();
-    if (stateErr) {
-      console.error("❌ Failed to load ball state", stateErr);
-      return false;
-    }
-    const nextState = replace ? partial : { ...(stateRow?.state ?? {}), ...partial };
-    const { error: updErr } = await supabase
-      .from("bonus_ball_data")
-      .update({ state: nextState })
-      .eq("id", ballId);
-    if (updErr) {
-      console.error("❌ Failed to persist ball state", updErr);
-      return false;
-    }
-    return true;
-  };
+  // helper removed: single-row model updates state.balls directly
   const [resetPin, setResetPin] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   
@@ -628,28 +607,22 @@ const loadBallsFromDb = async () => {
 
   const { data, error } = await supabase
     .from("bonus_ball_data")
-    .select("id, state");
+    .select("id, state")
+    .single();
 
   if (error) {
     console.error("❌ Failed to load bonus_ball_data", error);
     return;
   }
 
-  if (!data || data.length === 0) {
-    console.warn("⚠️ bonus_ball_data has no rows");
+  if (!data?.state?.balls) {
+    console.warn("⚠️ bonus_ball_data has no balls array");
     return;
   }
 
-  const aggregatedBalls = data.map((row: any) => ({ id: row.id, ...(row.state ?? {}) }));
-
-  if (aggregatedBalls.length === 0) {
-    console.warn("⚠️ bonus_ball_data contained rows but no balls were found");
-    return;
-  }
-
-  console.log("✅ Loaded balls:", aggregatedBalls);
-  setBonusBallRowId(data[0]?.id ?? null);
-  setBalls(aggregatedBalls);
+  console.log("✅ Loaded balls:", data.state.balls);
+  setBonusBallRowId(data.id ?? null);
+  setBalls(data.state.balls);
 };
 
 // Recovery modal password update (blocking)
@@ -689,10 +662,20 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       console.log("🧪 assign aborted", { reason: "guard", selectedBall: adminAction?.ballNum, bonusBallRowId });
       return;
     }
+    if (!bonusBallRowId) {
+      console.log("🧪 assign aborted", { reason: "guard", selectedBall: adminAction?.ballNum, bonusBallRowId });
+      return;
+    }
     console.log("🧪 assign persisting");
-    const okAssign = await updateBallState(num, { owner: assignmentName.trim() });
-    if (!okAssign) return;
     const updatedBalls = balls.map(b => b.number === num ? { ...b, owner: assignmentName.trim() } : b);
+    const { error } = await supabase
+      .from("bonus_ball_data")
+      .update({ state: { balls: updatedBalls } })
+      .eq("id", bonusBallRowId);
+    if (error) {
+      console.error("❌ Failed to persist assignment", error);
+      return;
+    }
     setManagedBallData(prev => ({
       ...prev,
       [num]: {
@@ -704,7 +687,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     }));
     setBalls(updatedBalls);
     console.log("✅ assign persisted");
-    setBalls(prev => prev.map(b => b.id === num ? { ...b, owner: assignmentName.trim() } : b));
     sendPush("Ball Assigned", `${assignmentName} has been assigned Ball #${num}`, "admin", "reminder");
     setAdminAction(null);
     setAssignmentName('');
@@ -761,14 +743,13 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
     console.log(`💾 Persisting payment for bonus_ball_data row ${bonusBallRowId}`);
     console.log(`💾 Persisting payment for ball ${num}`);
-    for (const targetNum of affectedNumbers) {
-      const updatedBall = updatedBalls.find(b => b.number === targetNum);
-      if (!updatedBall) continue;
-      const { number, ...partial } = updatedBall;
-      const ok = await updateBallState(targetNum, partial);
-      if (!ok) {
-        console.error("❌ Failed to persist payment", targetNum);
-      }
+    const { error } = await supabase
+      .from("bonus_ball_data")
+      .update({ state: { balls: updatedBalls } })
+      .eq("id", bonusBallRowId);
+    if (error) {
+      console.error("❌ Failed to persist payment", error);
+      return;
     }
     setBalls(updatedBalls);
     console.log("✅ Payment persisted");
@@ -1041,7 +1022,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-[3rem] p-10 md:p-14 shadow-2xl">
                     <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-6">
                       {balls.map((ball) => {
-                        const num = ball.id;
+                        const num = ball.number;
                         const ownerName = ball?.owner;
                         return (
                           <div key={num} onClick={() => setSelectedBallNum(num)} className="group cursor-pointer transition-all flex flex-col items-center gap-2">
@@ -1095,11 +1076,11 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                               Show not covered for next draw
                             </label>
                             <input type="text" placeholder="Search..." className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-pink-500" value={adminSearchTerm} onChange={(e) => setAdminSearchTerm(e.target.value)} />
-                          </div>
                         </div>
-                        <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                          {balls.map((ball) => {
-                            const num = ball.id;
+                      </div>
+                      <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                        {balls.map((ball) => {
+                            const num = ball.number;
                             const ownerName = ball?.owner;
                             const nextDueDate = ball.paidUntil
                               ? new Date(new Date(ball.paidUntil).getTime() + 7 * 24 * 60 * 60 * 1000)
