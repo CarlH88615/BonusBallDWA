@@ -1063,15 +1063,13 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             <LotteryBall number={num} className="w-full group-hover:scale-110 transition-transform" opacity={isPaid ? 1 : 0.1} />
                             <p className={`text-[8px] font-black uppercase truncate w-full text-center mt-1 transition-colors ${isPaid ? 'text-white/80' : 'text-white/20'}`}>
                               {ownerName
-                                ? <>
-                                    {ownerName}{!isPaid && ' ⚠️'}
-                                  </>
-                                : (!isPaid ? 'Open ⚠️' : 'Open')}
+                                ? `${ownerName}${isPaid ? '' : ' ⚠️'}`
+                                : 'Open'}
                             </p>
                             <p className="text-[8px] font-bold uppercase text-center text-white/30">
                               {isPaid
                                 ? `Paid until and including ${ball.paidUntil}`
-                                : 'Unpaid for next draw'}
+                                : 'Expired'}
                             </p>
                           </div>
                         );
@@ -1144,7 +1142,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                       {ownerName ?? `Vacant Ball #${num}`}{!isPaid && ' ⚠️'}
                                     </p>
                                     <p className="text-[9px] font-bold uppercase mt-1 text-white/30">
-                                      {isPaid ? `Paid until and including ${ball.paidUntil}` : 'Unpaid for next draw'}
+                                      {isPaid ? `Paid until and including ${ball.paidUntil}` : 'Expired'}
                                     </p>
                                   </div>
                                 </div>
@@ -1447,12 +1445,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 <div className="space-y-2 text-white">
                   <p className="text-lg font-black">
                     {selectedBall.owner ?? 'Unassigned'}
-                    {!isBallPaidForDraw(selectedBall) && ' ⚠️'}
+                    {!isBallPaidForDraw(selectedBall) && selectedBall.owner ? ' ⚠️' : ''}
                   </p>
                   <p className="text-sm text-white/70">
                     {isBallPaidForDraw(selectedBall)
                       ? `Paid until and including ${selectedBall.paidUntil}`
-                      : 'Unpaid for next draw'}
+                      : 'Expired'}
                   </p>
                 </div>
               )}
