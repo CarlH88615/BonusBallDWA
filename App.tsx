@@ -827,6 +827,23 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       console.error("❌ Failed to update bank balance", bankErr);
     } else {
       fetchBankBalance();
+      await supabase
+        .from("bonus_ball_ledger")
+        .insert([
+          {
+            type: "deposit",
+            amount: paymentAmount,
+            reference: "Ball payment",
+            notes: `Payment for ${affectedNumbers.length} ball(s), ${weeks} week(s)`,
+          },
+        ])
+        .then(({ error: ledgerErr }) => {
+          if (ledgerErr) {
+            console.error("❌ Failed to write ledger entry (deposit)", ledgerErr);
+          } else {
+            console.log("📒 Deposit recorded in ledger");
+          }
+        });
     }
 
     sendPush("Payment Logged", `Received payment for Ball #${num} (${weeks} week${weeks > 1 ? 's' : ''})`, "admin", "reminder");
