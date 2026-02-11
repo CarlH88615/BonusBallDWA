@@ -116,6 +116,7 @@ const App: React.FC = () => {
   const [resetPin, setResetPin] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
+  const [ledgerRows, setLedgerRows] = useState([]);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -521,9 +522,9 @@ const isAdmin = useMemo(() => {
     revealRequestRef.current = requestAnimationFrame(loop);
   };
 
-  useEffect(() => {
-    const w = window.innerWidth, h = window.innerHeight;
-    setSmallBalls([{ id: 1, x: w * 0.2, y: h * 0.2, vx: 0.8, vy: 0.6, radius: 40, num: 7 }, { id: 2, x: w * 0.8, y: h * 0.7, vx: -0.7, vy: 0.8, radius: 45, num: 24 }, { id: 3, x: w * 0.5, y: h * 0.4, vx: 0.5, vy: -0.9, radius: 35, num: 42 }]);
+useEffect(() => {
+  const w = window.innerWidth, h = window.innerHeight;
+  setSmallBalls([{ id: 1, x: w * 0.2, y: h * 0.2, vx: 0.8, vy: 0.6, radius: 40, num: 7 }, { id: 2, x: w * 0.8, y: h * 0.7, vx: -0.7, vy: 0.8, radius: 45, num: 24 }, { id: 3, x: w * 0.5, y: h * 0.4, vx: 0.5, vy: -0.9, radius: 35, num: 42 }]);
     const update = () => {
       setSmallBalls(prev => prev.map(b => {
         let nx = b.x + b.vx, ny = b.y + b.vy, vx = b.vx, vy = b.vy;
@@ -536,6 +537,21 @@ const isAdmin = useMemo(() => {
     requestRef.current = requestAnimationFrame(update);
     return () => cancelAnimationFrame(requestRef.current!);
   }, []);
+useEffect(() => {
+  if (!showLedger) return;
+
+  supabase
+    .from("bonus_ball_ledger")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .then(({ data, error }) => {
+      if (error) {
+        console.error("❌ Failed to load ledger", error);
+      } else {
+        setLedgerRows(data ?? []);
+      }
+    });
+}, [showLedger]);
 useEffect(() => {
   // This completes password reset / magic link flows
   supabase.auth.getSession().then(({ data, error }) => {
@@ -1352,7 +1368,32 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 </div>
 
                 <div className="p-4 overflow-y-auto">
-                  <p className="text-neutral-400">Ledger entries will appear here.</p>
+                  {ledgerRows.length === 0 ? (
+                    <p className="text-neutral-400">No ledger entries found.</p>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="text-neutral-400 border-b border-neutral-800">
+                        <tr>
+                          <th className="text-left py-2">Date</th>
+                          <th className="text-left py-2">Type</th>
+                          <th className="text-left py-2">Amount</th>
+                          <th className="text-left py-2">Reference</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ledgerRows.map((row) => (
+                          <tr key={row.id} className="border-b border-neutral-800">
+                            <td className="py-2">
+                              {new Date(row.created_at).toLocaleString()}
+                            </td>
+                            <td className="py-2">{row.type}</td>
+                            <td className="py-2">£{row.amount}</td>
+                            <td className="py-2">{row.reference}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
 
               </div>
