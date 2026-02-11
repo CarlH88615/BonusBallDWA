@@ -233,20 +233,42 @@ const isAdmin = useMemo(() => {
         } else {
           console.log("✅ Winner recorded");
           const bankDelta = isPaidWinner ? -(paidPot + totalRollover) : -(paidPot / 2);
-          supabase
-            .from("bonus_ball_bank")
-            .update({ balance: (bankBalance ?? 0) + bankDelta })
-            .eq("id", 1)
-            .then(({ error: bankErr }) => {
-              if (bankErr) {
-                console.error("❌ Failed to update bank balance", bankErr);
-              } else {
-                fetchBankBalance();
-              }
-            });
-          supabase
-            .from("bonus_ball_winners")
-            .select("*")
+        supabase
+          .from("bonus_ball_bank")
+          .update({ balance: (bankBalance ?? 0) + bankDelta })
+          .eq("id", 1)
+          .then(({ error: bankErr }) => {
+            if (bankErr) {
+              console.error("❌ Failed to update bank balance", bankErr);
+            } else {
+              fetchBankBalance();
+              const ledgerType = isPaidWinner ? "paid_win" : "charity";
+              const ledgerAmount = Math.abs(bankDelta);
+
+              supabase
+                .from("bonus_ball_ledger")
+                .insert([
+                  {
+                    type: ledgerType,
+                    amount: ledgerAmount,
+                    reference: `Draw ${drawDate}`,
+                    notes: isPaidWinner
+                      ? `Paid winner - Ball ${selectedResultBall}`
+                      : `Unpaid winner split - Ball ${selectedResultBall}`,
+                  },
+                ])
+                .then(({ error: ledgerErr }) => {
+                  if (ledgerErr) {
+                    console.error("❌ Failed to write ledger entry", ledgerErr);
+                  } else {
+                    console.log("📒 Ledger entry recorded");
+                  }
+                });
+            }
+          });
+        supabase
+          .from("bonus_ball_winners")
+          .select("*")
             .order("draw_date", { ascending: false })
             .then(({ data, error: fetchErr }) => {
               if (fetchErr) {
