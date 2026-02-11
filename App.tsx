@@ -115,6 +115,7 @@ const App: React.FC = () => {
   // helper removed: single-row model updates state.balls directly
   const [resetPin, setResetPin] = useState('');
   const [isResetting, setIsResetting] = useState(false);
+  const [showLedger, setShowLedger] = useState(false);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -1195,6 +1196,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             <span className="text-[10px] font-black uppercase text-white/40 tracking-widest text-center">Reset Pot</span>
                           </button>
                         </div>
+                        <button
+                          onClick={() => setShowLedger(true)}
+                          className="mt-4 w-full rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white py-3"
+                        >
+                          View Ledger
+                        </button>
                       </div>
                     </div>
                     <div className="space-y-8">
@@ -1329,6 +1336,28 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
               })}
             </div>
           </nav>
+
+          {showLedger && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+              <div className="bg-neutral-900 rounded-2xl w-[90%] max-w-3xl max-h-[80vh] flex flex-col">
+                
+                <div className="flex justify-between items-center p-4 border-b border-neutral-800">
+                  <h2 className="text-lg font-semibold">Ledger</h2>
+                  <button
+                    onClick={() => setShowLedger(false)}
+                    className="text-neutral-400 hover:text-white"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div className="p-4 overflow-y-auto">
+                  <p className="text-neutral-400">Ledger entries will appear here.</p>
+                </div>
+
+              </div>
+            </div>
+          )}
 
           {/* ADMIN ACTION MODAL */}
           {adminAction && isAdmin && (
