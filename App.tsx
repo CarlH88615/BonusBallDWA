@@ -762,7 +762,15 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       return;
     }
     console.log("🧪 assign persisting");
-    const updatedBalls = balls.map(b => b.number === num ? { ...b, owner: assignmentName.trim() } : b);
+    const selectedMember = members.find(
+      (m) => m.id === selectedMemberId
+    );
+    const updatedBalls = balls.map(b => b.number === num ? {
+      ...b,
+      owner: assignmentName.trim(),
+      userId: selectedMember ? selectedMember.id : null,
+      email: selectedMember ? selectedMember.email : null,
+    } : b);
     const { error } = await supabase
       .from("bonus_ball_data")
       .update({ state: { balls: updatedBalls } })
