@@ -145,6 +145,16 @@ const isAdmin = useMemo(() => {
 
   const paidCount = useMemo(() => Object.values(managedBallData).filter(b => b.status === 'paid' || b.status === 'lifetime').length, [managedBallData]);
   const totalRaised = useMemo(() => pastResults.reduce((acc, curr) => acc + curr.charityAmount, 0), [pastResults]);
+  const deleteScheduled = async (id) => {
+    await supabase
+      .from("scheduled_notifications")
+      .delete()
+      .eq("id", id);
+
+    setScheduledNotifications((prev) =>
+      prev.filter((item) => item.id !== id)
+    );
+  };
 
   const upcomingDrawDate = useMemo(() => drawDate ? new Date(drawDate) : null, [drawDate]);
   const upcomingDrawDateTime = useMemo(() => {
@@ -1513,6 +1523,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                   Repeat: {item.repeat_rule}
                                 </p>
                               )}
+                              <button
+                                onClick={() => deleteScheduled(item.id)}
+                                className="mt-3 text-xs text-red-400 hover:text-red-300"
+                              >
+                                Delete
+                              </button>
                             </div>
                           ))}
                         </div>
