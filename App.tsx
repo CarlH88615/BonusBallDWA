@@ -127,6 +127,7 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
   const [loginEmail, setLoginEmail] = useState("");
+  const [fullName, setFullName] = useState("");
   const requestRef = useRef<number>(null);
 
   const [managedBallData, setManagedBallData] = useState<Record<number, BallOwnerDetails>>({});
@@ -405,6 +406,7 @@ const isAdmin = useMemo(() => {
   e.preventDefault();
 
   const formData = new FormData(e.currentTarget);
+  const fullName = String(formData.get("fullName") ?? "");
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
 
@@ -416,6 +418,14 @@ const isAdmin = useMemo(() => {
   if (error) {
     alert(error.message);
     return;
+  }
+
+  if (data?.user) {
+    await supabase.from("members").insert({
+      id: data.user.id,
+      email: data.user.email,
+      full_name: fullName
+    });
   }
 
   // If email confirmations are ON, session may be null until confirmed.
@@ -1776,6 +1786,20 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
   {/* REGISTER */}
   {authMode === "register" && (
     <form onSubmit={handleRegister} className="space-y-6">
+      <div className="space-y-2">
+        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
+          Full Name
+        </label>
+        <input
+          name="fullName"
+          required
+          type="text"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
+          placeholder="Your name"
+        />
+      </div>
       <div className="space-y-2">
         <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
           Email
