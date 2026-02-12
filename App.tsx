@@ -129,6 +129,7 @@ const App: React.FC = () => {
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
   const [loginEmail, setLoginEmail] = useState("");
   const [fullName, setFullName] = useState("");
+  const [editingBall, setEditingBall] = useState(null);
   const requestRef = useRef<number>(null);
 
   const [managedBallData, setManagedBallData] = useState<Record<number, BallOwnerDetails>>({});
@@ -1270,7 +1271,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                       <button onClick={() => handleUpdatePaymentInitiate(num)} className="px-3 py-1.5 text-[9px] font-black uppercase rounded-lg bg-pink-500 text-black hover:bg-pink-400 transition-all">Record Payment</button>
                                       <button
                                         onClick={() => {
-                                          console.log("Edit clicked for ball:", ball.number);
+                                          setEditingBall(ball);
                                         }}
                                         className="p-2 bg-white/5 text-white/30 hover:text-white rounded-lg"
                                       >
@@ -1564,6 +1565,33 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <div className="flex justify-between text-xs font-bold"><span>Prize Pot</span><span>£{currentPot}</span></div>
                         </div>
                       </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {editingBall && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+                  <div className="bg-[#020407] border border-white/10 rounded-3xl p-8 w-full max-w-md space-y-6">
+                    <h3 className="text-xl font-bold uppercase tracking-wide">
+                      Edit Ball {editingBall.number}
+                    </h3>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-sm text-gray-400">Owner Name</label>
+                        <input
+                          type="text"
+                          defaultValue={editingBall.owner || ""}
+                          className="w-full mt-1 p-3 rounded-xl bg-white/5 border border-white/10 text-white"
+                        />
+                      </div>
+
+                      <button
+                        onClick={() => setEditingBall(null)}
+                        className="w-full py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 transition"
+                      >
+                        Close
+                      </button>
                     </div>
                   </div>
                 </div>
