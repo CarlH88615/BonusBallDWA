@@ -842,10 +842,14 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     console.log("Updated balls payload:", updatedBalls);
     console.log("Reset payload:", JSON.stringify(updatedBalls, null, 2));
 
-    await supabase
+    const { data, error } = await supabase
       .from("bonus_ball_data")
       .update({ balls: updatedBalls })
-      .eq("id", 1); // keep single-row structure
+      .eq("id", 1)
+      .select(); // keep single-row structure
+
+    console.log("Reset result:", { data, error });
+    if (error) return;
 
     setShowAssignModal(false);
   };
