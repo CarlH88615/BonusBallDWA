@@ -839,6 +839,8 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
         : b
     );
 
+    console.log("Updated balls payload:", updatedBalls);
+
     await supabase
       .from("bonus_ball_data")
       .update({ balls: updatedBalls })
