@@ -44,15 +44,23 @@ export const handler: Handler = async (event) => {
     const payload = JSON.stringify({ title, body });
 
     const results = await Promise.allSettled(
-      subs.map((s) =>
-        webpush.sendNotification(
-          {
-            endpoint: s.endpoint,
-            keys: { p256dh: s.p256dh, auth: s.auth },
-          },
-          payload
-        )
-      )
+      subs.map(async (s) => {
+        try {
+          await webpush.sendNotification(
+            {
+              endpoint: s.endpoint,
+              keys: { p256dh: s.p256dh, auth: s.auth },
+            },
+            payload
+          );
+          return { success: true };
+        } catch (err: any) {
+          console.error("Push failed for endpoint:", s.endpoint);
+          console.error("Status:", err?.statusCode);
+          console.error("Body:", err?.body);
+          throw err;
+        }
+      })
     );
 
     const ok = results.filter((r) => r.status === "fulfilled").length;
