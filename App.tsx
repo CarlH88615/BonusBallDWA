@@ -979,7 +979,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   const sub = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     // VAPID key comes next step
-                    applicationServerKey: "BHVgrLLErDyjtSReIJeWZOL27gripbHleClGnntY_t0geLSV4BfQbLGpRUnuDUnwFHItHba5g3UAMnQG7POpYoE",
+                    applicationServerKey: "BEsePk0iViWt7yB2ofqMomHnxYgE7fiAgwHl4nLS1OPzKJE0gsILh4mvoDxwQW_c_2vSflXjn57oXXkPfhBltyw",
                   });
 
                   console.log("Push subscription:", JSON.stringify(sub));
