@@ -1333,15 +1333,29 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             disabled={isTransmitting || !blastMessage}
                             onClick={async () => {
                               console.log("Send Broadcast config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
-                              if (deliveryMode === "push" || deliveryMode === "both") {
+                              const payload = { title: "Announcement", body: blastMessage };
+                              const sendPushNotification = async (p: { title: string; body: string }) => {
                                 await fetch("/.netlify/functions/push-broadcast", {
                                   method: "POST",
                                   headers: { "content-type": "application/json" },
-                                  body: JSON.stringify({ title: "Announcement", body: blastMessage }),
+                                  body: JSON.stringify(p),
                                 });
+                              };
+                              const sendInAppBroadcast = async (p: { title: string; body: string }) => {
+                                sendPush(p.title, p.body, blastTarget, 'blast');
+                              };
+
+                              if (deliveryMode === "push") {
+                                await sendPushNotification(payload);
                               }
-                              if (deliveryMode === "inapp" || deliveryMode === "both") {
-                                sendPush("Announcement", blastMessage, blastTarget, 'blast');
+
+                              if (deliveryMode === "inapp") {
+                                await sendInAppBroadcast(payload);
+                              }
+
+                              if (deliveryMode === "both") {
+                                await sendPushNotification(payload);
+                                await sendInAppBroadcast(payload);
                               }
                             }}
                             className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10"
