@@ -117,6 +117,12 @@ const App: React.FC = () => {
   const [isResetting, setIsResetting] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
   const [ledgerRows, setLedgerRows] = useState([]);
+  const [deliveryMode, setDeliveryMode] = useState<"push" | "inapp">("push");
+  const [scheduleMode, setScheduleMode] = useState<"now" | "once" | "recurring">("now");
+  const [scheduleOnceDate, setScheduleOnceDate] = useState<string>('');
+  const [scheduleOnceTime, setScheduleOnceTime] = useState<string>('');
+  const [recurringDay, setRecurringDay] = useState<string>('Sat');
+  const [recurringTime, setRecurringTime] = useState<string>('20:00');
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -1242,13 +1248,68 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3 mb-8">Broadcaster</h4>
                         <div className="space-y-6">
+                          {/* Delivery mode toggle */}
+                          <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Delivery Mode</label>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setDeliveryMode("push")}
+                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${deliveryMode === "push" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}
+                              >
+                                Push Notification
+                              </button>
+                              <button
+                                onClick={() => setDeliveryMode("inapp")}
+                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${deliveryMode === "inapp" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}
+                              >
+                                In-App Broadcast
+                              </button>
+                            </div>
+                          </div>
                           <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Target</label><div className="flex gap-2">{(['all', 'unpaid'] as const).map(t => (
                             <button key={t} onClick={() => setBlastTarget(t)} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${blastTarget === t ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>{t}</button>
-                          ))}</div></div>
+                          ))}<button disabled className="flex-1 py-2 text-[10px] font-black uppercase rounded-lg border bg-white/5 border-white/10 text-white/20 cursor-not-allowed">custom</button></div></div>
+                          {/* Schedule mode */}
+                          <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Schedule</label>
+                            <div className="flex gap-2">
+                              <button onClick={() => setScheduleMode("now")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "now" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Send Now</button>
+                              <button onClick={() => setScheduleMode("once")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "once" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Schedule Once</button>
+                              <button onClick={() => setScheduleMode("recurring")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "recurring" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Recurring</button>
+                            </div>
+                          </div>
+                          {/* Schedule inputs (UI only) */}
+                          {scheduleMode === "once" && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <input type="date" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={scheduleOnceDate} onChange={(e) => setScheduleOnceDate(e.target.value)} />
+                              <input type="time" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={scheduleOnceTime} onChange={(e) => setScheduleOnceTime(e.target.value)} />
+                            </div>
+                          )}
+                          {scheduleMode === "recurring" && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <select className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value="weekly" disabled>
+                                <option value="weekly">Weekly</option>
+                              </select>
+                              <select className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={recurringDay} onChange={(e) => setRecurringDay(e.target.value)}>
+                                {["Sat","Sun","Mon","Tue","Wed","Thu","Fri"].map(d => <option key={d} value={d}>{d}</option>)}
+                              </select>
+                              <input type="time" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={recurringTime} onChange={(e) => setRecurringTime(e.target.value)} />
+                            </div>
+                          )}
                           <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Payload</label><textarea value={blastMessage} onChange={(e) => setBlastMessage(e.target.value)} rows={5} placeholder="Message text..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm outline-none focus:border-pink-500 transition-all resize-none" /></div>
-                          <button disabled={isTransmitting || !blastMessage} onClick={() => sendPush("Announcement", blastMessage, blastTarget, 'blast')} className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10">{isTransmitting ? 'Transmitting...' : 'Send Broadcast'}</button>
+                          <button
+                            disabled={isTransmitting || !blastMessage}
+                            onClick={() => {
+                              console.log("Send Broadcast config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
+                              sendPush("Announcement", blastMessage, blastTarget, 'blast');
+                            }}
+                            className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10"
+                          >
+                            {isTransmitting ? 'Transmitting...' : 'Send Broadcast'}
+                          </button>
                           <button
                             onClick={async () => {
+                              console.log("Test Push config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
                               const res = await fetch("/.netlify/functions/push-broadcast", {
                                 method: "POST",
                                 headers: { "content-type": "application/json" },
