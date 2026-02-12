@@ -25,7 +25,8 @@ export const handler: Handler = async (event) => {
     // Fetch all subscriptions
     const { data, error } = await supabaseAdmin
       .from("push_subscriptions")
-      .select("endpoint,p256dh,auth");
+      .select("endpoint,p256dh,auth")
+      .eq("active", true);
 
     if (error) {
       console.error("Supabase error:", error);
