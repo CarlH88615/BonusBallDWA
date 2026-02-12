@@ -30,9 +30,18 @@ export const handler = schedule("*/1 * * * *", async () => {
       })
     });
 
-    await supabase
-      .from("scheduled_notifications")
-      .update({ active: false })
-      .eq("id", notification.id);
+    if (notification.repeat_rule) {
+      const next = new Date(notification.send_at);
+      next.setDate(next.getDate() + 7);
+      await supabase
+        .from("scheduled_notifications")
+        .update({ send_at: next.toISOString(), active: true })
+        .eq("id", notification.id);
+    } else {
+      await supabase
+        .from("scheduled_notifications")
+        .update({ active: false })
+        .eq("id", notification.id);
+    }
   }
 });
