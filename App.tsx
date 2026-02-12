@@ -1111,7 +1111,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             ) : null}
           </header>
 
-          <main className="relative z-10 flex-1 overflow-y-auto p-6 pb-40">
+          <main className="relative z-10 flex-1 p-6 pb-40">
             <div className="max-w-6xl mx-auto">
               {activeTab === 'home' && (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
