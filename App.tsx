@@ -1393,23 +1393,27 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                 });
                               } else if (scheduleMode === "recurring") {
                                 const dayIndexMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-                                const targetDay = dayIndexMap[recurringDay] ?? 6;
-                                const [hour, minute] = recurringTime.split(":").map(Number);
-                                const now = new Date();
-                                const next = new Date(now);
-                                next.setHours(hour ?? 0, minute ?? 0, 0, 0);
-                                const currentDay = next.getDay();
-                                let diff = targetDay - currentDay;
-                                if (diff < 0 || (diff === 0 && next <= now)) {
-                                  diff += 7;
-                                }
-                                next.setDate(next.getDate() + diff);
+                                const calcNext = () => {
+                                  const targetDay = dayIndexMap[recurringDay] ?? 6;
+                                  const [hour, minute] = recurringTime.split(":").map(Number);
+                                  const now = new Date();
+                                  const next = new Date(now);
+                                  next.setHours(hour ?? 0, minute ?? 0, 0, 0);
+                                  const currentDay = next.getDay();
+                                  let diff = targetDay - currentDay;
+                                  if (diff < 0 || (diff === 0 && next <= now)) {
+                                    diff += 7;
+                                  }
+                                  next.setDate(next.getDate() + diff);
+                                  return next;
+                                };
+                                const nextDate = calcNext();
                                 await supabase.from("scheduled_notifications").insert({
                                   title: payload.title || "Broadcast",
                                   body: payload.body,
                                   target: blastTarget,
                                   delivery_mode: deliveryMode,
-                                  send_at: next,
+                                  send_at: nextDate.toISOString(),
                                   repeat_rule: `weekly:${recurringDay}:${recurringTime}`,
                                   active: true,
                                 });
