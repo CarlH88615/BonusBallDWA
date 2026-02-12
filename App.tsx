@@ -124,7 +124,6 @@ const App: React.FC = () => {
   const [recurringDay, setRecurringDay] = useState<string>('Sat');
   const [recurringTime, setRecurringTime] = useState<string>('20:00');
   const [scheduledNotifications, setScheduledNotifications] = useState([]);
-  const [adminActiveTab, setAdminActiveTab] = useState("directory");
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -1222,26 +1221,8 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
               {activeTab === 'admin' && isAdmin && (
                 <div className="animate-in fade-in slide-in-from-bottom-8 duration-500 space-y-12">
-                  <div className="mt-6 mb-8 overflow-x-auto">
-                    <div className="flex gap-3 min-w-max">
-                      {["directory", "push", "draw", "finance"].map((tab) => (
-                        <button
-                          key={tab}
-                          onClick={() => setAdminActiveTab(tab)}
-                          className={`px-4 py-2 rounded-full text-sm font-semibold tracking-wide uppercase transition ${
-                            adminActiveTab === tab
-                              ? "bg-pink-600 text-black"
-                              : "bg-neutral-800 text-gray-300 hover:bg-neutral-700"
-                          }`}
-                        >
-                          {tab}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-2 space-y-8">
-                      {adminActiveTab === "directory" && (
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <div className="flex items-center justify-between mb-8">
                           <h4 className="text-2xl font-black text-white uppercase tracking-tighter">Directory Control</h4>
@@ -1298,9 +1279,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           })}
                         </div>
                       </div>
-                      </div>
-                      )}
-                      {adminActiveTab === "draw" && (
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-8">Quick Actions</h4>
                         <div className="grid grid-cols-2 gap-4">
@@ -1320,195 +1298,154 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           View Ledger
                         </button>
                       </div>
-                      )}
                     </div>
                     <div className="space-y-8">
-                      {adminActiveTab === "push" && (
-                        <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
-                          <h4 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3 mb-8">Broadcaster</h4>
-                          <div className="space-y-6">
-                            {/* Delivery mode toggle */}
-                            <div>
-                              <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Delivery Mode</label>
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => setDeliveryMode("push")}
-                                  className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${deliveryMode === "push" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}
-                                >
-                                  Push Notification
-                                </button>
-                                <button
-                                  onClick={() => setDeliveryMode("inapp")}
-                                  className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${deliveryMode === "inapp" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}
-                                >
-                                  In-App Broadcast
-                                </button>
-                              </div>
+                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
+                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3 mb-8">Broadcaster</h4>
+                        <div className="space-y-6">
+                          {/* Delivery mode toggle */}
+                          <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Delivery Mode</label>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setDeliveryMode("push")}
+                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${deliveryMode === "push" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}
+                              >
+                                Push Notification
+                              </button>
+                              <button
+                                onClick={() => setDeliveryMode("inapp")}
+                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${deliveryMode === "inapp" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}
+                              >
+                                In-App Broadcast
+                              </button>
                             </div>
-                            <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Target</label><div className="flex gap-2">{(['all', 'unpaid'] as const).map(t => (
-                              <button key={t} onClick={() => setBlastTarget(t)} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${blastTarget === t ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>{t}</button>
-                            ))}<button disabled className="flex-1 py-2 text-[10px] font-black uppercase rounded-lg border bg-white/5 border-white/10 text-white/20 cursor-not-allowed">custom</button></div></div>
-                            {/* Schedule mode */}
-                            <div>
-                              <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Schedule</label>
-                              <div className="flex gap-2">
-                                <button onClick={() => setScheduleMode("now")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "now" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Send Now</button>
-                                <button onClick={() => setScheduleMode("once")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "once" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Schedule Once</button>
-                                <button onClick={() => setScheduleMode("recurring")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "recurring" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Recurring</button>
-                              </div>
+                          </div>
+                          <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Target</label><div className="flex gap-2">{(['all', 'unpaid'] as const).map(t => (
+                            <button key={t} onClick={() => setBlastTarget(t)} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${blastTarget === t ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>{t}</button>
+                          ))}<button disabled className="flex-1 py-2 text-[10px] font-black uppercase rounded-lg border bg-white/5 border-white/10 text-white/20 cursor-not-allowed">custom</button></div></div>
+                          {/* Schedule mode */}
+                          <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Schedule</label>
+                            <div className="flex gap-2">
+                              <button onClick={() => setScheduleMode("now")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "now" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Send Now</button>
+                              <button onClick={() => setScheduleMode("once")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "once" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Schedule Once</button>
+                              <button onClick={() => setScheduleMode("recurring")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "recurring" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Recurring</button>
                             </div>
-                            {/* Schedule inputs (UI only) */}
-                            {scheduleMode === "once" && (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <input type="date" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={scheduleOnceDate} onChange={(e) => setScheduleOnceDate(e.target.value)} />
-                                <input type="time" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={scheduleOnceTime} onChange={(e) => setScheduleOnceTime(e.target.value)} />
-                              </div>
-                            )}
-                            {scheduleMode === "recurring" && (
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                <select className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value="weekly" disabled>
-                                  <option value="weekly">Weekly</option>
-                                </select>
-                                <select className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={recurringDay} onChange={(e) => setRecurringDay(e.target.value)}>
-                                  {["Sat","Sun","Mon","Tue","Wed","Thu","Fri"].map(d => <option key={d} value={d}>{d}</option>)}
-                                </select>
-                                <input type="time" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={recurringTime} onChange={(e) => setRecurringTime(e.target.value)} />
-                              </div>
-                            )}
-                            <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Payload</label><textarea value={blastMessage} onChange={(e) => setBlastMessage(e.target.value)} rows={5} placeholder="Message text..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm outline-none focus:border-pink-500 transition-all resize-none" /></div>
-                            <button
-                              disabled={isTransmitting || !blastMessage}
-                              onClick={async () => {
-                                console.log("Send Broadcast config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
-                                const payload = { title: "Announcement", body: blastMessage };
-                                const sendPushNotification = async (p: { title: string; body: string }) => {
-                                  await fetch("/.netlify/functions/push-broadcast", {
-                                    method: "POST",
-                                    headers: { "content-type": "application/json" },
-                                    body: JSON.stringify(p),
-                                  });
-                                };
-                                const sendInAppBroadcast = async (p: { title: string; body: string }) => {
-                                  sendPush(p.title, p.body, blastTarget, 'blast');
-                                };
-
-                                if (scheduleMode === "now") {
-                                  if (deliveryMode === "push") {
-                                    await sendPushNotification(payload);
-                                  }
-
-                                  if (deliveryMode === "inapp") {
-                                    await sendInAppBroadcast(payload);
-                                  }
-
-                                  if (deliveryMode === "both") {
-                                    await sendPushNotification(payload);
-                                    await sendInAppBroadcast(payload);
-                                  }
-                                } else if (scheduleMode === "once") {
-                                  await supabase.from("scheduled_notifications").insert({
-                                    title: payload.title || "Broadcast",
-                                    body: payload.body,
-                                    target: blastTarget,
-                                    delivery_mode: deliveryMode,
-                                    send_at: new Date(`${scheduleOnceDate}T${scheduleOnceTime}`),
-                                    repeat_rule: null,
-                                    active: true,
-                                  });
-                                } else if (scheduleMode === "recurring") {
-                                  const dayIndexMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-                                  const calcNext = () => {
-                                    const targetDay = dayIndexMap[recurringDay] ?? 6;
-                                    const [hour, minute] = recurringTime.split(":").map(Number);
-                                    const now = new Date();
-                                    const next = new Date(now);
-                                    next.setHours(hour ?? 0, minute ?? 0, 0, 0);
-                                    const currentDay = next.getDay();
-                                    let diff = targetDay - currentDay;
-                                    if (diff < 0 || (diff === 0 && next <= now)) {
-                                      diff += 7;
-                                    }
-                                    next.setDate(next.getDate() + diff);
-                                    return next;
-                                  };
-                                  const nextDate = calcNext();
-                                  await supabase.from("scheduled_notifications").insert({
-                                    title: payload.title || "Broadcast",
-                                    body: payload.body,
-                                    target: blastTarget,
-                                    delivery_mode: deliveryMode,
-                                    send_at: nextDate.toISOString(),
-                                    repeat_rule: `weekly:${recurringDay}:${recurringTime}`,
-                                    active: true,
-                                  });
-                                }
-                              }}
-                              className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10"
-                            >
-                              {isTransmitting ? 'Transmitting...' : 'Send Broadcast'}
-                            </button>
-                            <button
-                              onClick={async () => {
-                                console.log("Test Push config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
-                                const res = await fetch("/.netlify/functions/push-broadcast", {
+                          </div>
+                          {/* Schedule inputs (UI only) */}
+                          {scheduleMode === "once" && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <input type="date" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={scheduleOnceDate} onChange={(e) => setScheduleOnceDate(e.target.value)} />
+                              <input type="time" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={scheduleOnceTime} onChange={(e) => setScheduleOnceTime(e.target.value)} />
+                            </div>
+                          )}
+                          {scheduleMode === "recurring" && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <select className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value="weekly" disabled>
+                                <option value="weekly">Weekly</option>
+                              </select>
+                              <select className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={recurringDay} onChange={(e) => setRecurringDay(e.target.value)}>
+                                {["Sat","Sun","Mon","Tue","Wed","Thu","Fri"].map(d => <option key={d} value={d}>{d}</option>)}
+                              </select>
+                              <input type="time" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={recurringTime} onChange={(e) => setRecurringTime(e.target.value)} />
+                            </div>
+                          )}
+                          <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Payload</label><textarea value={blastMessage} onChange={(e) => setBlastMessage(e.target.value)} rows={5} placeholder="Message text..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm outline-none focus:border-pink-500 transition-all resize-none" /></div>
+                          <button
+                            disabled={isTransmitting || !blastMessage}
+                            onClick={async () => {
+                              console.log("Send Broadcast config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
+                              const payload = { title: "Announcement", body: blastMessage };
+                              const sendPushNotification = async (p: { title: string; body: string }) => {
+                                await fetch("/.netlify/functions/push-broadcast", {
                                   method: "POST",
                                   headers: { "content-type": "application/json" },
-                                  body: JSON.stringify({ title: "Test Push", body: "Hello from Netlify Function ✅" }),
+                                  body: JSON.stringify(p),
                                 });
+                              };
+                              const sendInAppBroadcast = async (p: { title: string; body: string }) => {
+                                sendPush(p.title, p.body, blastTarget, 'blast');
+                              };
 
-                                const text = await res.text();
-                                if (!res.ok) {
-                                  alert(text);
-                                  return;
+                              if (scheduleMode === "now") {
+                                if (deliveryMode === "push") {
+                                  await sendPushNotification(payload);
                                 }
+
+                                if (deliveryMode === "inapp") {
+                                  await sendInAppBroadcast(payload);
+                                }
+
+                                if (deliveryMode === "both") {
+                                  await sendPushNotification(payload);
+                                  await sendInAppBroadcast(payload);
+                                }
+                              } else if (scheduleMode === "once") {
+                                await supabase.from("scheduled_notifications").insert({
+                                  title: payload.title || "Broadcast",
+                                  body: payload.body,
+                                  target: blastTarget,
+                                  delivery_mode: deliveryMode,
+                                  send_at: new Date(`${scheduleOnceDate}T${scheduleOnceTime}`),
+                                  repeat_rule: null,
+                                  active: true,
+                                });
+                              } else if (scheduleMode === "recurring") {
+                                const dayIndexMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+                                const calcNext = () => {
+                                  const targetDay = dayIndexMap[recurringDay] ?? 6;
+                                  const [hour, minute] = recurringTime.split(":").map(Number);
+                                  const now = new Date();
+                                  const next = new Date(now);
+                                  next.setHours(hour ?? 0, minute ?? 0, 0, 0);
+                                  const currentDay = next.getDay();
+                                  let diff = targetDay - currentDay;
+                                  if (diff < 0 || (diff === 0 && next <= now)) {
+                                    diff += 7;
+                                  }
+                                  next.setDate(next.getDate() + diff);
+                                  return next;
+                                };
+                                const nextDate = calcNext();
+                                await supabase.from("scheduled_notifications").insert({
+                                  title: payload.title || "Broadcast",
+                                  body: payload.body,
+                                  target: blastTarget,
+                                  delivery_mode: deliveryMode,
+                                  send_at: nextDate.toISOString(),
+                                  repeat_rule: `weekly:${recurringDay}:${recurringTime}`,
+                                  active: true,
+                                });
+                              }
+                            }}
+                            className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10"
+                          >
+                            {isTransmitting ? 'Transmitting...' : 'Send Broadcast'}
+                          </button>
+                          <button
+                            onClick={async () => {
+                              console.log("Test Push config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
+                              const res = await fetch("/.netlify/functions/push-broadcast", {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                body: JSON.stringify({ title: "Test Push", body: "Hello from Netlify Function ✅" }),
+                              });
+
+                              const text = await res.text();
+                              if (!res.ok) {
                                 alert(text);
-                              }}
-                              className="w-full py-4 bg-white/10 text-white font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-white/20 transition-all"
-                            >
-                              Send Test Push (Real)
-                            </button>
+                                return;
+                              }
+                              alert(text);
+                            }}
+                            className="w-full py-4 bg-white/10 text-white font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-white/20 transition-all"
+                          >
+                            Send Test Push (Real)
+                          </button>
 
-                          </div>
-                          <div className="mt-10">
-                            <h3 className="text-lg font-bold mb-4">Scheduled Notifications</h3>
-
-                            {scheduledNotifications.length === 0 && (
-                              <p className="text-gray-400">No scheduled notifications.</p>
-                            )}
-
-                            {scheduledNotifications.map((item) => (
-                              <div
-                                key={item.id}
-                                className="mb-4 p-4 rounded bg-black border border-gray-700"
-                              >
-                                <p className="font-semibold">{item.title}</p>
-                                <p className="text-sm text-gray-400">{item.body}</p>
-                                <p className="text-xs text-gray-500 mt-2">
-                                  Target: {item.target} | Mode: {item.delivery_mode}
-                                </p>
-                                {item.send_at && (
-                                  <p className="text-xs text-gray-500">
-                                    Send At: {new Date(item.send_at).toLocaleString()}
-                                  </p>
-                                )}
-                                {item.repeat_rule && (
-                                  <p className="text-xs text-gray-500">
-                                    Repeat: {item.repeat_rule}
-                                  </p>
-                                )}
-                                <button
-                                  onClick={() => deleteScheduled(item.id)}
-                                  className="mt-3 text-xs text-red-400 hover:text-red-300"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            ))}
-                          </div>
                         </div>
-                        </div>
-                      )}
-                      {adminActiveTab === "draw" && (
+                      </div>
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Record Result</h4>
                         <div className="space-y-4">
@@ -1531,14 +1468,10 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Rollover: £{rolloverAmount}</p>
                         </div>
                       </div>
-                      )}
-                      {adminActiveTab === "finance" && (
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Bank</h4>
                         <p className="text-sm font-black text-white/80">Balance: £{bankBalance}</p>
                       </div>
-                      )}
-                      {adminActiveTab === "finance" && (
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6 text-left">Hard Reset</h4>
                         <p className="text-sm text-red-400 font-black uppercase mb-3">This cannot be undone</p>
@@ -1557,8 +1490,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           {isResetting ? 'Resetting...' : 'Hard Reset'}
                         </button>
                       </div>
-                      )}
-                      {adminActiveTab === "draw" && (
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Update Draw Date</h4>
                         <div className="space-y-3">
@@ -1581,9 +1512,43 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             Save Draw Date
                             </button>
                         </div>
+                        <div className="mt-10">
+                          <h3 className="text-lg font-bold mb-4">Scheduled Notifications</h3>
+
+                          {scheduledNotifications.length === 0 && (
+                            <p className="text-gray-400">No scheduled notifications.</p>
+                          )}
+
+                          {scheduledNotifications.map((item) => (
+                            <div
+                              key={item.id}
+                              className="mb-4 p-4 rounded bg-black border border-gray-700"
+                            >
+                              <p className="font-semibold">{item.title}</p>
+                              <p className="text-sm text-gray-400">{item.body}</p>
+                              <p className="text-xs text-gray-500 mt-2">
+                                Target: {item.target} | Mode: {item.delivery_mode}
+                              </p>
+                              {item.send_at && (
+                                <p className="text-xs text-gray-500">
+                                  Send At: {new Date(item.send_at).toLocaleString()}
+                                </p>
+                              )}
+                              {item.repeat_rule && (
+                                <p className="text-xs text-gray-500">
+                                  Repeat: {item.repeat_rule}
+                                </p>
+                              )}
+                              <button
+                                onClick={() => deleteScheduled(item.id)}
+                                className="mt-3 text-xs text-red-400 hover:text-red-300"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      )}
-                      {adminActiveTab === "finance" && (
                       <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-[2.5rem] p-10 text-black shadow-2xl">
                          <div className="flex justify-between items-start mb-10"><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60">Revenue</p><h4 className="text-4xl font-black tracking-tighter leading-none">{paidCount > 0 ? 'Active' : 'Growth'}</h4></div><div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></div></div>
                          <div className="space-y-4">
@@ -1592,7 +1557,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <div className="flex justify-between text-xs font-bold"><span>Prize Pot</span><span>£{currentPot}</span></div>
                         </div>
                       </div>
-                      )}
                     </div>
                   </div>
                 </div>
