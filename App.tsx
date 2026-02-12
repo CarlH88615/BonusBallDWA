@@ -134,6 +134,7 @@ const App: React.FC = () => {
   const [pastResults, setPastResults] = useState<DrawResult[]>([]);
   const [totalRollover, setTotalRollover] = useState(0);
   const [members, setMembers] = useState([]);
+  const [selectedMemberId, setSelectedMemberId] = useState("");
 
   // DYNAMIC CALCULATIONS
 const isAdmin = useMemo(() => {
@@ -1527,6 +1528,18 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       placeholder="Member name"
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
                     />
+                    <select
+                      value={selectedMemberId}
+                      onChange={(e) => setSelectedMemberId(e.target.value)}
+                      className="w-full mt-2 p-2 rounded bg-black border border-gray-600 text-white"
+                    >
+                      <option value="">Optional: Link to registered member</option>
+                      {members.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.full_name} ({member.email})
+                        </option>
+                      ))}
+                    </select>
                     <button
                       onClick={commitAssignment}
                       className="w-full py-4 bg-pink-500 text-black font-black rounded-xl"
