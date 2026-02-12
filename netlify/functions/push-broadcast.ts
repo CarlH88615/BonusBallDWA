@@ -28,7 +28,15 @@ export const handler: Handler = async (event) => {
       .select("endpoint,p256dh,auth");
 
     if (error) {
-      return { statusCode: 500, body: error.message };
+      console.error("Supabase error:", error);
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          supabaseError: error.message,
+          code: error.code,
+          details: error.details
+        })
+      };
     }
 
     const subs = data || [];
