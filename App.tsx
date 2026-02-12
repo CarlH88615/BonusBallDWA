@@ -123,6 +123,7 @@ const App: React.FC = () => {
   const [scheduleOnceTime, setScheduleOnceTime] = useState<string>('');
   const [recurringDay, setRecurringDay] = useState<string>('Sat');
   const [recurringTime, setRecurringTime] = useState<string>('20:00');
+  const [scheduledNotifications, setScheduledNotifications] = useState([]);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
@@ -555,6 +556,18 @@ useEffect(() => {
     requestRef.current = requestAnimationFrame(update);
     return () => cancelAnimationFrame(requestRef.current!);
   }, []);
+useEffect(() => {
+  const fetchScheduled = async () => {
+    const { data } = await supabase
+      .from("scheduled_notifications")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (data) setScheduledNotifications(data);
+  };
+
+  fetchScheduled();
+}, []);
 useEffect(() => {
   const fetchMembers = async () => {
     const { data } = await supabase
@@ -1471,7 +1484,37 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             className="w-full py-3 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-xl"
                           >
                             Save Draw Date
-                          </button>
+                            </button>
+                        </div>
+                        <div className="mt-10">
+                          <h3 className="text-lg font-bold mb-4">Scheduled Notifications</h3>
+
+                          {scheduledNotifications.length === 0 && (
+                            <p className="text-gray-400">No scheduled notifications.</p>
+                          )}
+
+                          {scheduledNotifications.map((item) => (
+                            <div
+                              key={item.id}
+                              className="mb-4 p-4 rounded bg-black border border-gray-700"
+                            >
+                              <p className="font-semibold">{item.title}</p>
+                              <p className="text-sm text-gray-400">{item.body}</p>
+                              <p className="text-xs text-gray-500 mt-2">
+                                Target: {item.target} | Mode: {item.delivery_mode}
+                              </p>
+                              {item.send_at && (
+                                <p className="text-xs text-gray-500">
+                                  Send At: {new Date(item.send_at).toLocaleString()}
+                                </p>
+                              )}
+                              {item.repeat_rule && (
+                                <p className="text-xs text-gray-500">
+                                  Repeat: {item.repeat_rule}
+                                </p>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       </div>
                       <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-[2.5rem] p-10 text-black shadow-2xl">
