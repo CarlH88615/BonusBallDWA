@@ -1345,17 +1345,39 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                 sendPush(p.title, p.body, blastTarget, 'blast');
                               };
 
-                              if (deliveryMode === "push") {
-                                await sendPushNotification(payload);
-                              }
+                              if (scheduleMode === "now") {
+                                if (deliveryMode === "push") {
+                                  await sendPushNotification(payload);
+                                }
 
-                              if (deliveryMode === "inapp") {
-                                await sendInAppBroadcast(payload);
-                              }
+                                if (deliveryMode === "inapp") {
+                                  await sendInAppBroadcast(payload);
+                                }
 
-                              if (deliveryMode === "both") {
-                                await sendPushNotification(payload);
-                                await sendInAppBroadcast(payload);
+                                if (deliveryMode === "both") {
+                                  await sendPushNotification(payload);
+                                  await sendInAppBroadcast(payload);
+                                }
+                              } else if (scheduleMode === "once") {
+                                await supabase.from("scheduled_notifications").insert({
+                                  title: payload.title || "Broadcast",
+                                  body: payload.body,
+                                  target: blastTarget,
+                                  delivery_mode: deliveryMode,
+                                  send_at: new Date(`${scheduleOnceDate}T${scheduleOnceTime}`),
+                                  repeat_rule: null,
+                                  active: true,
+                                });
+                              } else if (scheduleMode === "recurring") {
+                                await supabase.from("scheduled_notifications").insert({
+                                  title: payload.title || "Broadcast",
+                                  body: payload.body,
+                                  target: blastTarget,
+                                  delivery_mode: deliveryMode,
+                                  send_at: null,
+                                  repeat_rule: `weekly:${recurringDay}:${recurringTime}`,
+                                  active: true,
+                                });
                               }
                             }}
                             className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10"
