@@ -851,6 +851,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     console.log("Reset result:", { data, error });
     if (error) return;
 
+    setBalls(updatedBalls);
     setShowAssignModal(false);
   };
 
