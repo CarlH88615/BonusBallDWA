@@ -1009,6 +1009,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       endpoint,
                       p256dh,
                       auth,
+                      active: true,
                       created_at: new Date().toISOString(),
                     },
                     { onConflict: "endpoint" }
