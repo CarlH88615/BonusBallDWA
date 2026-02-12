@@ -127,6 +127,7 @@ const App: React.FC = () => {
   
   const [searchTerm, setSearchTerm] = useState('');
   const [adminSearchTerm, setAdminSearchTerm] = useState('');
+  const [showAssignModal, setShowAssignModal] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const requestRef = useRef<number>(null);
@@ -817,6 +818,33 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     setAdminAction(null);
     setAssignmentName('');
     setSelectedBallNum(null);
+  };
+
+  const handleResetToVacant = async () => {
+    if (!adminAction?.ballNum) return;
+
+    const selectedBall = balls.find((b) => b.number === adminAction.ballNum);
+    if (!selectedBall) return;
+
+    const updatedBalls = balls.map((b) =>
+      b.number === selectedBall.number
+        ? {
+            ...b,
+            owner: null,
+            ownerName: null,
+            userId: null,
+            email: null,
+            paidUntil: null,
+          }
+        : b
+    );
+
+    await supabase
+      .from("bonus_ball_data")
+      .update({ balls: updatedBalls })
+      .eq("id", 1); // keep single-row structure
+
+    setShowAssignModal(false);
   };
 
   const commitPayment = async () => {
@@ -1673,6 +1701,13 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         </option>
                       ))}
                     </select>
+                    <button
+                      type="button"
+                      onClick={handleResetToVacant}
+                      className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-700 transition text-white font-semibold"
+                    >
+                      Reset to Vacant
+                    </button>
                     <button
                       onClick={commitAssignment}
                       className="w-full py-4 bg-pink-500 text-black font-black rounded-xl"
