@@ -844,7 +844,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
     const { data, error } = await supabase
       .from("bonus_ball_data")
-      .update({ balls: updatedBalls })
+      .update({ state: updatedBalls })
       .eq("id", 1)
       .select(); // keep single-row structure
 
