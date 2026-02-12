@@ -133,6 +133,7 @@ const App: React.FC = () => {
   const [managedBallData, setManagedBallData] = useState<Record<number, BallOwnerDetails>>({});
   const [pastResults, setPastResults] = useState<DrawResult[]>([]);
   const [totalRollover, setTotalRollover] = useState(0);
+  const [members, setMembers] = useState([]);
 
   // DYNAMIC CALCULATIONS
 const isAdmin = useMemo(() => {
@@ -541,8 +542,8 @@ const isAdmin = useMemo(() => {
 useEffect(() => {
   const w = window.innerWidth, h = window.innerHeight;
   setSmallBalls([{ id: 1, x: w * 0.2, y: h * 0.2, vx: 0.8, vy: 0.6, radius: 40, num: 7 }, { id: 2, x: w * 0.8, y: h * 0.7, vx: -0.7, vy: 0.8, radius: 45, num: 24 }, { id: 3, x: w * 0.5, y: h * 0.4, vx: 0.5, vy: -0.9, radius: 35, num: 42 }]);
-    const update = () => {
-      setSmallBalls(prev => prev.map(b => {
+  const update = () => {
+    setSmallBalls(prev => prev.map(b => {
         let nx = b.x + b.vx, ny = b.y + b.vy, vx = b.vx, vy = b.vy;
         if (nx - b.radius < 0 || nx + b.radius > window.innerWidth) vx *= -1;
         if (ny - b.radius < 0 || ny + b.radius > window.innerHeight) vy *= -1;
@@ -553,6 +554,18 @@ useEffect(() => {
     requestRef.current = requestAnimationFrame(update);
     return () => cancelAnimationFrame(requestRef.current!);
   }, []);
+useEffect(() => {
+  const fetchMembers = async () => {
+    const { data } = await supabase
+      .from("members")
+      .select("id, email, full_name")
+      .order("full_name");
+
+    if (data) setMembers(data);
+  };
+
+  fetchMembers();
+}, []);
 useEffect(() => {
   if (!showLedger) return;
 
