@@ -9,7 +9,7 @@ const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY!;
 
 const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-webpush.setVapidDetails("mailto:admin@yourapp.local", VAPID_PUBLIC, VAPID_PRIVATE);
+webpush.setVapidDetails("https://clever-eclair-5bc08f.netlify.app", VAPID_PUBLIC, VAPID_PRIVATE);
 
 export const handler: Handler = async (event) => {
   try {
