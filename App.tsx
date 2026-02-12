@@ -1331,9 +1331,18 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Payload</label><textarea value={blastMessage} onChange={(e) => setBlastMessage(e.target.value)} rows={5} placeholder="Message text..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm outline-none focus:border-pink-500 transition-all resize-none" /></div>
                           <button
                             disabled={isTransmitting || !blastMessage}
-                            onClick={() => {
+                            onClick={async () => {
                               console.log("Send Broadcast config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
-                              sendPush("Announcement", blastMessage, blastTarget, 'blast');
+                              if (deliveryMode === "push" || deliveryMode === "both") {
+                                await fetch("/.netlify/functions/push-broadcast", {
+                                  method: "POST",
+                                  headers: { "content-type": "application/json" },
+                                  body: JSON.stringify({ title: "Announcement", body: blastMessage }),
+                                });
+                              }
+                              if (deliveryMode === "inapp" || deliveryMode === "both") {
+                                sendPush("Announcement", blastMessage, blastTarget, 'blast');
+                              }
                             }}
                             className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10"
                           >
