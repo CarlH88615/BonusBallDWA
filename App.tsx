@@ -1268,7 +1268,14 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                   {ownerName ? (
                                     <>
                                       <button onClick={() => handleUpdatePaymentInitiate(num)} className="px-3 py-1.5 text-[9px] font-black uppercase rounded-lg bg-pink-500 text-black hover:bg-pink-400 transition-all">Record Payment</button>
-                                      <button onClick={() => handleRemoveBall(num)} className="p-2 bg-white/5 text-white/30 hover:text-white rounded-lg"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                                      <button
+                                        onClick={() => {
+                                          console.log("Edit clicked for ball:", ball.number);
+                                        }}
+                                        className="p-2 bg-white/5 text-white/30 hover:text-white rounded-lg"
+                                      >
+                                        Edit
+                                      </button>
                                     </>
                                   ) : (
                                     <button onClick={() => setAdminAction({ type: 'assign', ballNum: num })} className="px-3 py-1.5 bg-white/5 text-white/40 text-[9px] font-black uppercase rounded-lg hover:bg-white/10 transition-all">Assign Member</button>
