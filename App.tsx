@@ -1402,7 +1402,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                 await fetch("/.netlify/functions/push-broadcast", {
                                   method: "POST",
                                   headers: { "content-type": "application/json" },
-                                  body: JSON.stringify(p),
+                                  body: JSON.stringify({ ...p, target: blastTarget }),
                                 });
                               };
                               const sendInAppBroadcast = async (p: { title: string; body: string }) => {
