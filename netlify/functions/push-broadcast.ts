@@ -17,16 +17,63 @@ export const handler: Handler = async (event) => {
       return { statusCode: 405, body: "Method Not Allowed" };
     }
 
-    const { title, body } = JSON.parse(event.body || "{}");
+    const { title, body, target } = JSON.parse(event.body || "{}");
     if (!title || !body) {
       return { statusCode: 400, body: "Missing title/body" };
     }
 
-    // Fetch all subscriptions
-    const { data, error } = await supabaseAdmin
+    // Fetch subscriptions (optionally filter to unpaid users)
+    let subsQuery = supabaseAdmin
       .from("push_subscriptions")
       .select("endpoint,p256dh,auth")
       .eq("active", true);
+
+    if (target === "unpaid") {
+      const { data: bonusData, error: bonusErr } = await supabaseAdmin
+        .from("bonus_ball_data")
+        .select("state")
+        .eq("id", 1)
+        .single();
+
+      if (bonusErr) {
+        console.error("Supabase bonus_ball_data error:", bonusErr);
+        return {
+          statusCode: 500,
+          body: JSON.stringify({
+            supabaseError: bonusErr.message,
+            code: bonusErr.code,
+            details: bonusErr.details,
+          }),
+        };
+      }
+
+      const balls = (bonusData as any)?.state?.balls ?? [];
+      const now = new Date();
+      const unpaidUserIds = Array.from(
+        new Set(
+          balls
+            .filter((b: any) => {
+              if (!b?.paidUntil) return true;
+              const paidDate = new Date(b.paidUntil);
+              return paidDate < now;
+            })
+            .map((b: any) => b.userId)
+            .filter((id: any) => !!id)
+        )
+      );
+
+      if (unpaidUserIds.length === 0) {
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ sent: 0, failed: 0, total: 0, note: "No unpaid users" }),
+          headers: { "content-type": "application/json" },
+        };
+      }
+
+      subsQuery = subsQuery.in("user_id", unpaidUserIds);
+    }
+
+    const { data, error } = await subsQuery;
 
     if (error) {
       console.error("Supabase error:", error);
