@@ -5,7 +5,7 @@ import { supabase } from "./services/supabase";
 
 const AnimatedBallsBackground = ({ smallBalls }: { smallBalls: BallState[] }) => {
   return (
-    <div className="fixed inset-0 -z-10 pointer-events-none opacity-20 overflow-hidden">
+    <div className="fixed inset-0 z-0 pointer-events-none opacity-20 overflow-hidden">
       {smallBalls.map((ball) => (
         <div
           key={ball.id}
@@ -1109,7 +1109,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
   };
 
   return (
-    <div className="relative min-h-screen bg-[#020407] overflow-hidden flex flex-col font-display">
+    <div className="relative min-h-screen bg-[#020407] overflow-hidden flex flex-col font-display z-10">
       <AnimatedBallsBackground smallBalls={smallBalls} />
       {/* WIN REVEAL */}
       {showWinReveal && (
