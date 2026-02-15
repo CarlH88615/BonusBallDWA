@@ -3,6 +3,34 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LotteryBall } from './components/LotteryBall';
 import { supabase } from "./services/supabase";
 
+const AnimatedBallsBackground = ({ smallBalls }: { smallBalls: BallState[] }) => {
+  return (
+    <div className="fixed inset-0 -z-10 pointer-events-none opacity-20 overflow-hidden">
+      {smallBalls.map((ball) => (
+        <div
+          key={ball.id}
+          className="absolute"
+          style={{
+            left: ball.x,
+            top: ball.y,
+            width: ball.radius * 2,
+            height: ball.radius * 2,
+            transform: "translate(-50%, -50%)",
+          }}
+        >
+          <LotteryBall
+            number={ball.num}
+            hideShadow
+            className="w-full h-full"
+            opacity={0.3}
+            blur="1px"
+          />
+        </div>
+      ))}
+    </div>
+  );
+};
+
 
 
 
@@ -1082,6 +1110,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
   return (
     <div className="relative min-h-screen bg-[#020407] overflow-hidden flex flex-col font-display">
+      <AnimatedBallsBackground smallBalls={smallBalls} />
       {/* WIN REVEAL */}
       {showWinReveal && (
         <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-black overflow-hidden">
@@ -1965,31 +1994,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       ) : (
   /* Login / Register */
   <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6">
-    {/* Background balls */}
-    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full pointer-events-none opacity-20 overflow-hidden">
-      {smallBalls.map(ball => (
-        <div
-          key={ball.id}
-          className="absolute"
-          style={{
-            left: ball.x,
-            top: ball.y,
-            width: ball.radius * 2,
-            height: ball.radius * 2,
-            transform: "translate(-50%, -50%)",
-          }}
-        >
-          <LotteryBall
-            number={ball.num}
-            hideShadow
-            className="w-full h-full"
-            opacity={0.3}
-            blur="1px"
-          />
-        </div>
-      ))}
-    </div>
-
     {/* Logo / Title */}
     <div className="relative z-10 text-center mb-12">
       <div className="w-16 h-16 rounded-full bg-pink-500 mx-auto flex items-center justify-center text-black font-black text-sm mb-6 shadow-2xl animate-bounce">
