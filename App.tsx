@@ -834,22 +834,23 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       console.error("❌ Failed to persist assignment", error);
       return;
     }
-    setManagedBallData(prev => ({
-      ...prev,
-      [num]: {
-        name: assignmentName.trim(),
-        status: 'paid',
+  setManagedBallData(prev => ({
+    ...prev,
+    [num]: {
+      name: assignmentName.trim(),
+      status: 'paid',
         paidUntil: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
         nextDue: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
       }
     }));
-    setBalls(updatedBalls);
-    console.log("✅ assign persisted");
-    sendPush("Ball Assigned", `${assignmentName} has been assigned Ball #${num}`, "admin", "reminder");
-    setAdminAction(null);
-    setAssignmentName('');
-    setSelectedBallNum(null);
-  };
+  setBalls(updatedBalls);
+  console.log("✅ assign persisted");
+  sendPush("Ball Assigned", `${assignmentName} has been assigned Ball #${num}`, "admin", "reminder");
+  setAdminAction(null);
+  setAssignmentName('');
+  setSelectedMemberId('');
+  setSelectedBallNum(null);
+};
 
   const handleResetToVacant = async () => {
     if (!adminAction?.ballNum) return;
