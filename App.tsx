@@ -896,6 +896,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     setAdminAction({ type: 'assign', ballNum });
   };
 
+  const openAssignModal = (ballNum: number) => {
+    setAssignmentName('');
+    setSelectedMemberId('');
+    setAdminAction({ type: 'assign', ballNum });
+  };
+
   const commitPayment = async () => {
     if (!isAdmin) return;
     const num = adminAction?.ballNum;
@@ -1353,7 +1359,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                       </button>
                                     </>
                                   ) : (
-                                    <button onClick={() => setAdminAction({ type: 'assign', ballNum: num })} className="px-3 py-1.5 bg-white/5 text-white/40 text-[9px] font-black uppercase rounded-lg hover:bg-white/10 transition-all">Assign Member</button>
+                                    <button onClick={() => openAssignModal(num)} className="px-3 py-1.5 bg-white/5 text-white/40 text-[9px] font-black uppercase rounded-lg hover:bg-white/10 transition-all">Assign Member</button>
                                   )}
                                 </div>
                               </div>
