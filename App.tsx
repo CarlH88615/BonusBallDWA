@@ -637,25 +637,27 @@ useEffect(() => {
 
   return () => sub.subscription.unsubscribe();
 }, []);
-useEffect(() => {
-  console.log("🔥 FETCHING bonus_ball_config");
-  supabase
-    .from("bonus_ball_config")
-    .select("current_draw_date, current_draw_timestamp")
-    .single()
-    .then(({ data, error }) => {
-      if (error) {
-        console.error("❌ bonus_ball_config fetch error", error);
-        console.error("❌ Failed to load draw config", error);
-        return;
-      }
-      console.log("✅ bonus_ball_config fetched", data);
-      setDrawDate(data.current_draw_date ?? null);
-      setDrawTimestamp(data.current_draw_timestamp ?? null);
-      setDrawDateInput(data.current_draw_date ?? '');
-      setDrawTimeInput(data.current_draw_timestamp ? data.current_draw_timestamp.split('T')[1]?.slice(0,5) ?? '' : '');
-    });
-}, []);
+  useEffect(() => {
+    console.log("🔥 FETCHING bonus_ball_config");
+    supabase
+      .from("bonus_ball_winners")
+      .select("draw_date, draw_timestamp, rollover_amount")
+      .eq("status", "open")
+      .single()
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("❌ bonus_ball_winners fetch error", error);
+          console.error("❌ Failed to load draw config", error);
+          return;
+        }
+        console.log("✅ bonus_ball_winners fetched", data);
+        setDrawDate(data.draw_date ?? null);
+        setDrawTimestamp(data.draw_timestamp ?? null);
+        setTotalRollover(data.rollover_amount ?? 0);
+        setDrawDateInput(data.draw_date ?? '');
+        setDrawTimeInput(data.draw_timestamp ?? '');
+      });
+  }, []);
 useEffect(() => {
   if (sessionEmail) {
     fetchBankBalance();
