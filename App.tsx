@@ -85,6 +85,7 @@ const App: React.FC = () => {
   const [blastTarget, setBlastTarget] = useState<'all' | 'unpaid' | 'specific'>('all');
   const [showInbox, setShowInbox] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
+  const [totalCharityRaised, setTotalCharityRaised] = useState<number>(0);
   const [balls, setBalls] = useState<any[]>([]);
   const [bonusBallRowId, setBonusBallRowId] = useState<string | null>(null);
   const [showNotCoveredOnly, setShowNotCoveredOnly] = useState(false);
@@ -665,11 +666,11 @@ useEffect(() => {
 
   return () => sub.subscription.unsubscribe();
 }, []);
-  useEffect(() => {
-    console.log("🔥 FETCHING bonus_ball_config");
-    supabase
-      .from("bonus_ball_winners")
-      .select("draw_date, draw_timestamp, rollover_amount")
+useEffect(() => {
+  console.log("🔥 FETCHING bonus_ball_config");
+  supabase
+    .from("bonus_ball_winners")
+    .select("draw_date, draw_timestamp, rollover_amount")
       .eq("status", "open")
       .single()
       .then(({ data, error }) => {
@@ -691,6 +692,24 @@ useEffect(() => {
     fetchBankBalance();
   }
 }, [sessionEmail]);
+useEffect(() => {
+  const fetchCharityTotal = async () => {
+    const { data, error } = await supabase
+      .from("bonus_ball_ledger")
+      .select("amount")
+      .eq("type", "charity");
+
+    if (error) {
+      console.error("❌ Failed to fetch charity total", error);
+      return;
+    }
+
+    const total = (data ?? []).reduce((sum, row) => sum + Number(row.amount), 0);
+    setTotalCharityRaised(total);
+  };
+
+  fetchCharityTotal();
+}, []);
 useEffect(() => {
   const fetchWinners = () => {
     supabase
@@ -1223,7 +1242,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     </div>
                     <div className="bg-pink-500 border border-pink-400 rounded-[2.5rem] p-10 flex flex-col justify-between text-black">
                       <div className="w-16 h-16 rounded-2xl bg-black/10 flex items-center justify-center mb-10"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636" /></svg></div>
-                      <div><p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-60">Total Raised</p><h4 className="text-5xl font-black tracking-tighter leading-none mb-2">£{totalRaised}</h4><p className="text-xs font-bold leading-tight">Supporting bereaved parents across the UK.</p></div>
+                      <div><p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-60">Total Raised</p><h4 className="text-5xl font-black tracking-tighter leading-none mb-2">£{totalCharityRaised}</h4><p className="text-xs font-bold leading-tight">Supporting bereaved parents across the UK.</p></div>
                     </div>
                   </div>
                 </div>
