@@ -1283,6 +1283,15 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 flex items-center justify-between shadow-xl"><div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Upcoming Draw</p><p className="text-2xl font-black text-white">{formattedDrawDate}</p></div><div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-white/20 font-black text-xs">Sat</div></div>
                     <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 shadow-xl w-full">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        {totalRollover > 0 && (
+                          <div className="mb-6 text-center w-full">
+                            <div className="inline-block px-6 py-2 rounded-full bg-gradient-to-r from-pink-500 via-orange-400 to-yellow-400 animate-pulse shadow-[0_0_25px_rgba(255,120,0,0.6)]">
+                              <span className="text-black font-black tracking-widest text-sm md:text-base">
+                                🔥 ROLLOVER ACTIVE 🔥
+                              </span>
+                            </div>
+                          </div>
+                        )}
                         <div>
                           <p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Active Prize</p>
                           <p className="text-4xl font-black text-white tracking-tighter">£{currentPot}</p>
