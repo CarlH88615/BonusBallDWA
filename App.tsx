@@ -696,6 +696,7 @@ useEffect(() => {
     supabase
       .from("bonus_ball_winners")
       .select("*")
+      .eq("status", "completed")
       .order("draw_date", { ascending: false })
       .then(({ data, error }) => {
         if (error) {
