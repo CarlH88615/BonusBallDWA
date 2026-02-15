@@ -210,7 +210,7 @@ const isAdmin = useMemo(() => {
   }, [balls, drawDateTime]);
 
   const latestWin = pastResults.length > 0 ? pastResults[0] : null;
-  const handleRecordResult = () => {
+  const handleRecordResult = async () => {
     if (!selectedResultBall) return;
     const ball = balls.find(b => b.number === selectedResultBall);
     const isPaidWinner = (() => {
@@ -223,85 +223,113 @@ const isAdmin = useMemo(() => {
     })();
     const isUnpaidWinner = !isPaidWinner; // vacant or assigned-but-unpaid
     const paidPot = currentPot - totalRollover; // only payments covering this draw
-
-    if (isPaidWinner) {
-      setTotalRollover(0);
-      setRolloverAmount(0);
-    } else if (isUnpaidWinner) {
-      const newRollover = totalRollover + paidPot / 2;
-      setTotalRollover(newRollover);
-      setRolloverAmount(newRollover);
-    }
+    const rolloverPersist = isPaidWinner ? 0 : totalRollover + paidPot / 2;
+    const amountWon = isPaidWinner ? paidPot + totalRollover : 0;
+    setTotalRollover(rolloverPersist);
+    setRolloverAmount(rolloverPersist);
     const drawDate = upcomingDrawDateTime.toISOString().split('T')[0];
     const drawTimestamp = upcomingDrawDateTime.toISOString();
-    const amountWon = isPaidWinner ? paidPot + totalRollover : 0;
-    const rolloverPersist = isPaidWinner ? 0 : totalRollover + paidPot / 2;
-      const winnerName = ball?.owner ?? null;
-    supabase
-      .from("bonus_ball_winners")
-      .insert([
-        {
-          draw_date: drawDate,
-          draw_timestamp: drawTimestamp,
+    const winnerName = ball?.owner ?? null;
+
+    try {
+      // Fetch open draw row
+      const { data: openRow, error: fetchOpenErr } = await supabase
+        .from("bonus_ball_winners")
+        .select("*")
+        .eq("status", "open")
+        .single();
+      if (fetchOpenErr || !openRow) {
+        console.error("❌ Failed to fetch open draw", fetchOpenErr);
+        return;
+      }
+
+      const nextDrawDate = new Date(openRow.draw_date);
+      nextDrawDate.setDate(nextDrawDate.getDate() + 7);
+      const nextDrawTimestamp = new Date(openRow.draw_timestamp);
+      nextDrawTimestamp.setDate(nextDrawTimestamp.getDate() + 7);
+
+      // Update open row to completed
+      const { error: updateErr } = await supabase
+        .from("bonus_ball_winners")
+        .update({
+          status: "completed",
           winning_number: selectedResultBall,
           winner_name: winnerName,
-          winner_user_id: null,
           amount_won: amountWon,
           rollover_amount: rolloverPersist,
-        },
-      ])
-      .then(({ error }) => {
-        if (error) {
-          console.error("❌ Failed to record winner", error);
-        } else {
-          console.log("✅ Winner recorded");
-          const bankDelta = isPaidWinner ? -(paidPot + totalRollover) : -(paidPot / 2);
-        supabase
-          .from("bonus_ball_bank")
-          .update({ balance: (bankBalance ?? 0) + bankDelta })
-          .eq("id", 1)
-          .then(({ error: bankErr }) => {
-            if (bankErr) {
-              console.error("❌ Failed to update bank balance", bankErr);
-            } else {
-              fetchBankBalance();
-              const ledgerType = isPaidWinner ? "paid_win" : "charity";
-              const ledgerAmount = Math.abs(bankDelta);
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", openRow.id);
+      if (updateErr) {
+        console.error("❌ Failed to record winner", updateErr);
+        return;
+      }
+      console.log("✅ Winner recorded");
 
-              supabase
-                .from("bonus_ball_ledger")
-                .insert([
-                  {
-                    type: ledgerType,
-                    amount: ledgerAmount,
-                    reference: `Draw ${drawDate}`,
-                    notes: isPaidWinner
-                      ? `Paid winner - Ball ${selectedResultBall}`
-                      : `Unpaid winner split - Ball ${selectedResultBall}`,
-                  },
-                ])
-                .then(({ error: ledgerErr }) => {
-                  if (ledgerErr) {
-                    console.error("❌ Failed to write ledger entry", ledgerErr);
-                  } else {
-                    console.log("📒 Ledger entry recorded");
-                  }
-                });
-            }
-          });
-        supabase
-          .from("bonus_ball_winners")
-          .select("*")
-            .order("draw_date", { ascending: false })
-            .then(({ data, error: fetchErr }) => {
-              if (fetchErr) {
-                console.error("❌ Failed to load winners", fetchErr);
-                return;
-              }
-              setWinnerRows(data ?? []);
-            });
+      // Insert next open row
+      const { error: newOpenErr } = await supabase
+        .from("bonus_ball_winners")
+        .insert([
+          {
+            draw_date: nextDrawDate.toISOString().split('T')[0],
+            draw_timestamp: nextDrawTimestamp.toISOString(),
+            status: "open",
+            rollover_amount: rolloverPersist,
+          },
+        ]);
+      if (newOpenErr) {
+        console.error("❌ Failed to create next open draw", newOpenErr);
+        return;
+      }
+
+      // Update bank
+      const bankDelta = isPaidWinner
+        ? -(paidPot + totalRollover)
+        : -(paidPot / 2);
+      const { error: bankErr } = await supabase
+        .from("bonus_ball_bank")
+        .update({ balance: (bankBalance ?? 0) + bankDelta })
+        .eq("id", 1);
+      if (bankErr) {
+        console.error("❌ Failed to update bank balance", bankErr);
+      } else {
+        fetchBankBalance();
+        const ledgerType = isPaidWinner ? "paid_win" : "charity";
+        const ledgerAmount = Math.abs(bankDelta);
+
+        // Insert ledger entry
+        const { error: ledgerErr } = await supabase
+          .from("bonus_ball_ledger")
+          .insert([
+            {
+              type: ledgerType,
+              amount: ledgerAmount,
+              reference: `Draw ${drawDate}`,
+              notes: isPaidWinner
+                ? `Paid winner - Ball ${selectedResultBall}`
+                : `Unpaid winner split - Ball ${selectedResultBall}`,
+            },
+          ]);
+        if (ledgerErr) {
+          console.error("❌ Failed to write ledger entry", ledgerErr);
+        } else {
+          console.log("📒 Ledger entry recorded");
         }
-      });
+      }
+
+      // Reload winners list
+      const { data, error: fetchErr } = await supabase
+        .from("bonus_ball_winners")
+        .select("*")
+        .order("draw_date", { ascending: false });
+      if (fetchErr) {
+        console.error("❌ Failed to load winners", fetchErr);
+        return;
+      }
+      setWinnerRows(data ?? []);
+    } catch (err) {
+      console.error("❌ Unexpected error in handleRecordResult", err);
+    }
   };
   const handleHardReset = async () => {
     if (!isAdmin) return;
