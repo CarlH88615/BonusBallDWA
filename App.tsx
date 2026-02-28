@@ -241,6 +241,7 @@ const isAdmin = useMemo(() => {
   };
   const totalBank = useMemo(() => {
     const weekMs = 7 * 24 * 60 * 60 * 1000;
+    console.log("TOTALBANK FIX LIVE");
     return balls.reduce((sum, ball) => {
       if (!ball.paidUntil) return sum;
       const paidUntilDate = new Date(ball.paidUntil);
