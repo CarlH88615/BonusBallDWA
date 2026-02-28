@@ -244,6 +244,7 @@ const isAdmin = useMemo(() => {
     return balls.reduce((sum, ball) => {
       if (!ball.paidUntil) return sum;
       const paidUntilDate = new Date(ball.paidUntil);
+      paidUntilDate.setHours(20, 0, 0, 0); // normalize to draw time
       if (paidUntilDate < drawDateTime) return sum;
       const weeksPaid = Math.floor((paidUntilDate.getTime() - drawDateTime.getTime()) / weekMs) + 1;
       const ballAmount = weeksPaid * 2;
