@@ -226,6 +226,19 @@ const isAdmin = useMemo(() => {
     sat.setDate(today.getDate() - ((today.getDay() + 1) % 7));
     return sat;
   }, []);
+
+  const formatPaidUntil = (iso?: string) => {
+    if (!iso) return '';
+
+    const date = new Date(iso);
+
+    return `${date.toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      year: '2-digit',
+    })} 8pm`;
+  };
   const totalBank = useMemo(() => {
     const weekMs = 7 * 24 * 60 * 60 * 1000;
     return balls.reduce((sum, ball) => {
@@ -1337,7 +1350,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             </p>
                             <p className="text-[8px] font-bold uppercase text-center text-white/30">
                               {isPaid
-                                ? `Paid until and including ${ball.paidUntil}`
+                                ? `Paid until and including ${formatPaidUntil(ball.paidUntil)}`
                                 : 'Expired'}
                             </p>
                           </div>
@@ -1411,7 +1424,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                       {ownerName ?? `Vacant Ball #${num}`}{!isPaid && ' ⚠️'}
                                     </p>
                                     <p className="text-[9px] font-bold uppercase mt-1 text-white/30">
-                                      {isPaid ? `Paid until and including ${ball.paidUntil}` : 'Expired'}
+                                      {isPaid ? `Paid until and including ${formatPaidUntil(ball.paidUntil)}` : 'Expired'}
                                     </p>
                                   </div>
                                 </div>
@@ -1947,7 +1960,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   </p>
                   <p className="text-sm text-white/70">
                     {isBallPaidForDraw(selectedBall)
-                      ? `Paid until and including ${selectedBall.paidUntil}`
+                      ? `Paid until and including ${formatPaidUntil(selectedBall.paidUntil)}`
                       : 'Expired'}
                   </p>
                 </div>
