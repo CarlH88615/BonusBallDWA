@@ -982,17 +982,28 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
     const updatedBalls = balls.map(ball => {
       if (!affectedNumbers.includes(ball.number)) return ball;
-      const today = new Date();
-      const saturday = new Date(today);
-      saturday.setHours(0, 0, 0, 0);
-      saturday.setDate(today.getDate() - ((today.getDay() + 1) % 7));
+
+      if (!upcomingDrawDateTime) return ball;
 
       const existingPaidUntil = ball.paidUntil ? new Date(ball.paidUntil) : null;
-      const startDate = existingPaidUntil && existingPaidUntil > saturday ? existingPaidUntil : saturday;
-      const newPaidUntilDate = new Date(startDate);
-      newPaidUntilDate.setDate(newPaidUntilDate.getDate() + (weeks * 7));
-      const formattedPaidUntil = newPaidUntilDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: '2-digit' }).replace(',', '');
-      return { ...ball, paidUntil: formattedPaidUntil };
+
+      // Base date is:
+      // - upcoming draw if not currently covered
+      // - otherwise existing paidUntil (to extend forward)
+      const baseDate =
+        existingPaidUntil && existingPaidUntil >= upcomingDrawDateTime
+          ? existingPaidUntil
+          : upcomingDrawDateTime;
+
+      // IMPORTANT: weeks - 1
+      const newPaidUntilDate = new Date(
+        baseDate.getTime() + (weeks - 1) * 7 * 24 * 60 * 60 * 1000
+      );
+
+      return {
+        ...ball,
+        paidUntil: newPaidUntilDate.toISOString(), // STORE ISO NOT LOCALE
+      };
     });
 
     if (!bonusBallRowId) return;
