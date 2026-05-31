@@ -79,6 +79,34 @@ type AuthMode = "login" | "register" | "forgot" | "reset";
 const ADMIN_EMAIL = 'Carlwhalliday@icloud.com';
 const TEST_EMAIL = 'test@user.com';
 
+// Draws are locked to Saturday 20:00 UK-local. These helpers keep all date math in local
+// time so we never trip on UTC/BST shifts.
+const formatLocalDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const computeUpcomingSaturday = (): string => {
+  const now = new Date();
+  const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0, 0);
+  if (candidate.getDay() === 6 && now < candidate) {
+    return formatLocalDate(candidate);
+  }
+  const daysToAdd = candidate.getDay() === 6 ? 7 : (6 - candidate.getDay() + 7) % 7;
+  candidate.setDate(candidate.getDate() + daysToAdd);
+  return formatLocalDate(candidate);
+};
+
+const isFutureSaturday = (dateStr: string): boolean => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y || !m || !d) return false;
+  const dt = new Date(y, m - 1, d, 20, 0, 0, 0);
+  return dt.getDay() === 6 && dt > new Date();
+};
+
+const saturdayIso = (dateStr: string): string => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d, 20, 0, 0, 0).toISOString();
+};
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
@@ -122,9 +150,6 @@ const App: React.FC = () => {
   const [selectedResultBall, setSelectedResultBall] = useState<number | null>(null);
   const [winnerRows, setWinnerRows] = useState<any[]>([]);
   const [drawDate, setDrawDate] = useState<string | null>(null);
-  const [drawTimestamp, setDrawTimestamp] = useState<string | null>(null);
-  const [drawDateInput, setDrawDateInput] = useState<string>('');
-  const [drawTimeInput, setDrawTimeInput] = useState<string>('');
   const [bankBalance, setBankBalance] = useState<number>(0);
   const fetchBankBalance = () => {
     console.log("🔥 FETCHING bonus_ball_bank");
@@ -186,16 +211,12 @@ const isAdmin = useMemo(() => {
     );
   };
 
-  const upcomingDrawDate = useMemo(() => drawDate ? new Date(drawDate) : null, [drawDate]);
   const upcomingDrawDateTime = useMemo(() => {
-    if (drawTimestamp) return new Date(drawTimestamp);
-    if (drawDate) {
-      const d = new Date(drawDate);
-      d.setHours(20, 0, 0, 0);
-      return d;
-    }
-    return null;
-  }, [drawDate, drawTimestamp]);
+    if (!drawDate) return null;
+    const [y, m, d] = drawDate.split('-').map(Number);
+    return new Date(y, m - 1, d, 20, 0, 0, 0);
+  }, [drawDate]);
+  const upcomingDrawDate = upcomingDrawDateTime;
   const currentPot = useMemo(() => {
     const coveredCount = balls.reduce((acc, ball) => {
       if (!ball.paidUntil) return acc;
@@ -209,23 +230,9 @@ const isAdmin = useMemo(() => {
   }, [balls, upcomingDrawDateTime, totalRollover]);
 
   const formattedDrawDate = useMemo(() => {
-    if (!drawDate) return '';
-    return new Date(drawDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-  }, [drawDate]);
-  const baselineSaturday = useMemo(() => {
-    const today = new Date();
-    const sat = new Date(today);
-    sat.setHours(0, 0, 0, 0);
-    sat.setDate(today.getDate() - ((today.getDay() + 1) % 7));
-    return sat;
-  }, []);
-  const drawDateTime = useMemo(() => {
-    const today = new Date();
-    const sat = new Date(today);
-    sat.setHours(20, 0, 0, 0);
-    sat.setDate(today.getDate() - ((today.getDay() + 1) % 7));
-    return sat;
-  }, []);
+    if (!upcomingDrawDateTime) return '';
+    return upcomingDrawDateTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  }, [upcomingDrawDateTime]);
 
   const formatPaidUntil = (iso?: string) => {
     if (!iso) return '';
@@ -239,20 +246,6 @@ const isAdmin = useMemo(() => {
       year: '2-digit',
     })} 8pm`;
   };
-  const totalBank = useMemo(() => {
-    const weekMs = 7 * 24 * 60 * 60 * 1000;
-    console.log("TOTALBANK FIX LIVE");
-    return balls.reduce((sum, ball) => {
-      if (!ball.paidUntil) return sum;
-      const paidUntilDate = new Date(ball.paidUntil);
-      paidUntilDate.setHours(20, 0, 0, 0); // normalize to draw time
-      if (paidUntilDate < drawDateTime) return sum;
-      const weeksPaid = Math.floor((paidUntilDate.getTime() - drawDateTime.getTime()) / weekMs) + 1;
-      const ballAmount = weeksPaid * 2;
-      return sum + ballAmount;
-    }, 0);
-  }, [balls, drawDateTime]);
-
   const latestWin = pastResults.length > 0 ? pastResults[0] : null;
   const handleRecordResult = async () => {
     if (!selectedResultBall) return;
@@ -287,10 +280,12 @@ const isAdmin = useMemo(() => {
         return;
       }
 
-      const nextDrawDate = new Date(openRow.draw_date);
-      nextDrawDate.setDate(nextDrawDate.getDate() + 7);
-      const nextDrawTimestamp = new Date(openRow.draw_timestamp);
-      nextDrawTimestamp.setDate(nextDrawTimestamp.getDate() + 7);
+      // Current draw is always Saturday — next draw is exactly 7 local days later (also Saturday).
+      const [cy, cm, cd] = openRow.draw_date.split('-').map(Number);
+      const nextLocal = new Date(cy, cm - 1, cd, 20, 0, 0, 0);
+      nextLocal.setDate(nextLocal.getDate() + 7);
+      const nextDrawDateStr = `${nextLocal.getFullYear()}-${String(nextLocal.getMonth() + 1).padStart(2, '0')}-${String(nextLocal.getDate()).padStart(2, '0')}`;
+      const nextDrawTimestampIso = nextLocal.toISOString();
 
       // Update open row to completed
       const { error: updateErr } = await supabase
@@ -315,8 +310,8 @@ const isAdmin = useMemo(() => {
         .from("bonus_ball_winners")
         .insert([
           {
-            draw_date: nextDrawDate.toISOString().split('T')[0],
-            draw_timestamp: nextDrawTimestamp.toISOString(),
+            draw_date: nextDrawDateStr,
+            draw_timestamp: nextDrawTimestampIso,
             status: "open",
             rollover_amount: rolloverPersist,
           },
@@ -427,36 +422,6 @@ const isAdmin = useMemo(() => {
       setResetPin('');
     }
   };
-  const handleUpdateDrawDate = async () => {
-    if (!isAdmin) return;
-    const datePart = drawDateInput;
-    const timePart = drawTimeInput || '20:00';
-    const isoTimestamp = datePart ? `${datePart}T${timePart}:00.000Z` : null;
-    const { error } = await supabase
-      .from("bonus_ball_config")
-      .update({ current_draw_date: datePart, current_draw_timestamp: isoTimestamp })
-      .eq("id", 1);
-    if (error) {
-      console.error("❌ Failed to update draw config", error);
-      return;
-    }
-    console.log("🔥 FETCHING bonus_ball_config");
-    const { data, error: refetchErr } = await supabase
-      .from("bonus_ball_config")
-      .select("current_draw_date, current_draw_timestamp")
-      .single();
-    if (refetchErr) {
-      console.error("❌ bonus_ball_config fetch error", refetchErr);
-      console.error("❌ Failed to load draw config", refetchErr);
-      return;
-    }
-    console.log("✅ bonus_ball_config fetched", data);
-    setDrawDate(data.current_draw_date ?? null);
-    setDrawTimestamp(data.current_draw_timestamp ?? null);
-    setDrawDateInput(data.current_draw_date ?? '');
-    setDrawTimeInput(data.current_draw_timestamp ? data.current_draw_timestamp.split('T')[1]?.slice(0,5) ?? '' : '');
-  };
-
   // HANDLERS
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
@@ -704,26 +669,39 @@ useEffect(() => {
   return () => sub.subscription.unsubscribe();
 }, []);
 useEffect(() => {
-  console.log("🔥 FETCHING bonus_ball_config");
-  supabase
-    .from("bonus_ball_winners")
-    .select("draw_date, draw_timestamp, rollover_amount")
+  const loadOpenDraw = async () => {
+    const { data, error } = await supabase
+      .from("bonus_ball_winners")
+      .select("id, draw_date, rollover_amount")
       .eq("status", "open")
-      .single()
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("❌ bonus_ball_winners fetch error", error);
-          console.error("❌ Failed to load draw config", error);
-          return;
-        }
-        console.log("✅ bonus_ball_winners fetched", data);
-        setDrawDate(data.draw_date ?? null);
-        setDrawTimestamp(data.draw_timestamp ?? null);
-        setTotalRollover(data.rollover_amount ?? 0);
-        setDrawDateInput(data.draw_date ?? '');
-        setDrawTimeInput(data.draw_timestamp ?? '');
-      });
-  }, []);
+      .single();
+    if (error || !data) {
+      console.error("❌ bonus_ball_winners fetch error", error);
+      return;
+    }
+
+    setTotalRollover(data.rollover_amount ?? 0);
+
+    // Always normalize the open draw to the upcoming Saturday 20:00 local. If the stored
+    // row is already a future Saturday, keep it; otherwise snap forward and persist.
+    const corrected = computeUpcomingSaturday();
+    const needsCorrection = !data.draw_date || !isFutureSaturday(data.draw_date);
+    if (needsCorrection) {
+      const correctedIso = saturdayIso(corrected);
+      const { error: updErr } = await supabase
+        .from("bonus_ball_winners")
+        .update({ draw_date: corrected, draw_timestamp: correctedIso })
+        .eq("id", data.id);
+      if (updErr) {
+        console.error("❌ Failed to snap open draw to Saturday", updErr);
+      }
+      setDrawDate(corrected);
+    } else {
+      setDrawDate(data.draw_date);
+    }
+  };
+  loadOpenDraw();
+}, []);
 useEffect(() => {
   if (sessionEmail) {
     fetchBankBalance();
@@ -1656,28 +1634,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         </button>
                       </div>
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
-                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Update Draw Date</h4>
-                        <div className="space-y-3">
-                          <input
-                            type="date"
-                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white"
-                            value={drawDateInput}
-                            onChange={(e) => setDrawDateInput(e.target.value)}
-                          />
-                          <input
-                            type="time"
-                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white"
-                            value={drawTimeInput}
-                            onChange={(e) => setDrawTimeInput(e.target.value)}
-                          />
-                          <button
-                            onClick={handleUpdateDrawDate}
-                            className="w-full py-3 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-xl"
-                          >
-                            Save Draw Date
-                            </button>
-                        </div>
-                        <div className="mt-10">
+                        <div>
                           <h3 className="text-lg font-bold mb-4">Scheduled Notifications</h3>
 
                           {scheduledNotifications.length === 0 && (
