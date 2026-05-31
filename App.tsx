@@ -267,7 +267,7 @@ const isAdmin = useMemo(() => {
     })();
     const isUnpaidWinner = !isPaidWinner; // vacant or assigned-but-unpaid
     const paidPot = currentPot - totalRollover; // only payments covering this draw
-    const rolloverPersist = isPaidWinner ? 0 : totalRollover + paidPot / 2;
+    const rolloverPersist = isPaidWinner ? 0 : totalRollover + paidPot;
     const amountWon = isPaidWinner ? paidPot + totalRollover : 0;
     setTotalRollover(rolloverPersist);
     setRolloverAmount(rolloverPersist);
@@ -326,38 +326,32 @@ const isAdmin = useMemo(() => {
         return;
       }
 
-      // Update bank
-      const bankDelta = isPaidWinner
-        ? -(paidPot + totalRollover)
-        : -(paidPot / 2);
-      const { error: bankErr } = await supabase
-        .from("bonus_ball_bank")
-        .update({ balance: (bankBalance ?? 0) + bankDelta })
-        .eq("id", 1);
-      if (bankErr) {
-        console.error("❌ Failed to update bank balance", bankErr);
-      } else {
-        fetchBankBalance();
-        const ledgerType = isPaidWinner ? "paid_win" : "charity";
-        const ledgerAmount = Math.abs(bankDelta);
-
-        // Insert ledger entry
-        const { error: ledgerErr } = await supabase
-          .from("bonus_ball_ledger")
-          .insert([
-            {
-              type: ledgerType,
-              amount: ledgerAmount,
-              reference: `Draw ${drawDate}`,
-              notes: isPaidWinner
-                ? `Paid winner - Ball ${selectedResultBall}`
-                : `Unpaid winner split - Ball ${selectedResultBall}`,
-            },
-          ]);
-        if (ledgerErr) {
-          console.error("❌ Failed to write ledger entry", ledgerErr);
+      // Update bank only when a paid winner takes money out. Unpaid wins roll 100% forward, so no bank/ledger movement.
+      if (isPaidWinner) {
+        const bankDelta = -(paidPot + totalRollover);
+        const { error: bankErr } = await supabase
+          .from("bonus_ball_bank")
+          .update({ balance: (bankBalance ?? 0) + bankDelta })
+          .eq("id", 1);
+        if (bankErr) {
+          console.error("❌ Failed to update bank balance", bankErr);
         } else {
-          console.log("📒 Ledger entry recorded");
+          fetchBankBalance();
+          const { error: ledgerErr } = await supabase
+            .from("bonus_ball_ledger")
+            .insert([
+              {
+                type: "paid_win",
+                amount: Math.abs(bankDelta),
+                reference: `Draw ${drawDate}`,
+                notes: `Paid winner - Ball ${selectedResultBall}`,
+              },
+            ]);
+          if (ledgerErr) {
+            console.error("❌ Failed to write ledger entry", ledgerErr);
+          } else {
+            console.log("📒 Ledger entry recorded");
+          }
         }
       }
 
@@ -1089,8 +1083,8 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       newRollover = 0;
     } else {
       winnerName = winnerData ? `${winnerData.name} (UNPAID)` : "VACANT";
-      charity = currentPot / 2;
-      newRollover = currentPot / 2;
+      charity = 0;
+      newRollover = currentPot;
     }
 
     const newResult: DrawResult = {
@@ -1276,8 +1270,8 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     <div className="flex items-start gap-6">
                       <div className="w-12 h-12 rounded-2xl bg-red-500 flex items-center justify-center flex-shrink-0 text-white shadow-lg"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div>
                       <div>
-                        <h4 className="text-xl font-black text-white tracking-tighter uppercase mb-2">Important Notice</h4>
-                        <p className="text-white/60 text-sm leading-relaxed max-w-xl">Unpaid winners forfeit 50% to charity and 50% to rollover. Please keep your entries current.</p>
+                        <h4 className="text-xl font-black text-white tracking-tighter uppercase mb-2">Heads Up</h4>
+                        <p className="text-white/60 text-sm leading-relaxed max-w-xl">Unpaid winners forfeit the full prize — 100% rolls over to the next draw. Please keep your entries current.</p>
                       </div>
                     </div>
                   </div>
