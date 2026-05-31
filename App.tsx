@@ -721,16 +721,14 @@ useEffect(() => {
     requestRef.current = requestAnimationFrame(update);
     return () => cancelAnimationFrame(requestRef.current!);
   }, []);
+const fetchScheduled = async () => {
+  const { data } = await supabase
+    .from("scheduled_notifications")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (data) setScheduledNotifications(data);
+};
 useEffect(() => {
-  const fetchScheduled = async () => {
-    const { data } = await supabase
-      .from("scheduled_notifications")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (data) setScheduledNotifications(data);
-  };
-
   fetchScheduled();
 }, []);
 useEffect(() => {
@@ -949,12 +947,39 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 };
 
 
-  const sendPush = (title: string, body: string, target: string, type: 'blast' | 'reminder' | 'win') => {
-    setIsTransmitting(true);
-    setTimeout(() => {
-      const newNotif: NotificationMessage = { id: Math.random().toString(36).substr(2, 9), title, body, timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }), type, target, read: false };
-      setNotifications(prev => [newNotif, ...prev]); setIsTransmitting(false); setBlastMessage('');
-    }, 800);
+  // In-app notification banner — instant, local only.
+  const addInAppNotification = (title: string, body: string, target: string, type: 'blast' | 'reminder' | 'win') => {
+    const newNotif: NotificationMessage = {
+      id: Math.random().toString(36).slice(2, 11),
+      title, body,
+      timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      type, target, read: false,
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+  };
+
+  // Real web-push to subscribers. Returns true on success.
+  const fireRealPush = async (title: string, body: string, target: string): Promise<boolean> => {
+    try {
+      const res = await fetch("/.netlify/functions/push-broadcast", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title, body, target }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.error("Push broadcast failed", e);
+      return false;
+    }
+  };
+
+  // Used by event handlers (assign, payment, draw, etc). Always shows in-app banner; for
+  // broadcast-style targets it also fires a real push so subscribers' phones get it.
+  const sendPush = async (title: string, body: string, target: string, type: 'blast' | 'reminder' | 'win') => {
+    addInAppNotification(title, body, target, type);
+    if (target === "all" || target === "unpaid") {
+      await fireRealPush(title, body, target);
+    }
   };
 
   // CORE ACTIONS
@@ -1460,10 +1485,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             <svg className="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
                             <span className="text-[10px] font-black uppercase text-white/40 tracking-widest text-center">Add Result</span>
                           </button>
-                          <button onClick={() => { if (confirm("Reset pot?")) setTotalRollover(0); }} className="flex flex-col items-center justify-center p-8 bg-white/5 border border-white/5 rounded-3xl hover:bg-white/10 transition-all gap-3">
-                            <svg className="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9" /></svg>
-                            <span className="text-[10px] font-black uppercase text-white/40 tracking-widest text-center">Reset Pot</span>
-                          </button>
                         </div>
                         <button
                           onClick={() => setShowLedger(true)}
@@ -1529,73 +1550,77 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <button
                             disabled={isTransmitting || !blastMessage}
                             onClick={async () => {
-                              console.log("Send Broadcast config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
-                              const payload = { title: "Announcement", body: blastMessage };
-                              const sendPushNotification = async (p: { title: string; body: string }) => {
-                                await fetch("/.netlify/functions/push-broadcast", {
-                                  method: "POST",
-                                  headers: { "content-type": "application/json" },
-                                  body: JSON.stringify({ ...p, target: blastTarget }),
-                                });
-                              };
-                              const sendInAppBroadcast = async (p: { title: string; body: string }) => {
-                                sendPush(p.title, p.body, blastTarget, 'blast');
-                              };
+                              const title = "Announcement";
+                              const body = blastMessage;
 
-                              if (scheduleMode === "now") {
-                                if (deliveryMode === "push") {
-                                  await sendPushNotification(payload);
+                              if (scheduleMode === "once") {
+                                if (!scheduleOnceDate || !scheduleOnceTime) {
+                                  alert("Pick a date and time for the scheduled send.");
+                                  return;
                                 }
-
-                                if (deliveryMode === "inapp") {
-                                  await sendInAppBroadcast(payload);
+                                const sendAt = new Date(`${scheduleOnceDate}T${scheduleOnceTime}`);
+                                if (isNaN(sendAt.getTime()) || sendAt <= new Date()) {
+                                  alert("Scheduled time must be in the future.");
+                                  return;
                                 }
-
-                                if (deliveryMode === "both") {
-                                  await sendPushNotification(payload);
-                                  await sendInAppBroadcast(payload);
-                                }
-                              } else if (scheduleMode === "once") {
-                                await supabase.from("scheduled_notifications").insert({
-                                  title: payload.title || "Broadcast",
-                                  body: payload.body,
-                                  target: blastTarget,
-                                  delivery_mode: deliveryMode,
-                                  send_at: new Date(`${scheduleOnceDate}T${scheduleOnceTime}`),
-                                  repeat_rule: null,
-                                  active: true,
-                                });
-                              } else if (scheduleMode === "recurring") {
-                                const dayIndexMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-                                const calcNext = () => {
-                                  const targetDay = dayIndexMap[recurringDay] ?? 6;
-                                  const [hour, minute] = recurringTime.split(":").map(Number);
-                                  const now = new Date();
-                                  const next = new Date(now);
-                                  next.setHours(hour ?? 0, minute ?? 0, 0, 0);
-                                  const currentDay = next.getDay();
-                                  let diff = targetDay - currentDay;
-                                  if (diff < 0 || (diff === 0 && next <= now)) {
-                                    diff += 7;
-                                  }
-                                  next.setDate(next.getDate() + diff);
-                                  return next;
-                                };
-                                const nextDate = calcNext();
-                                await supabase.from("scheduled_notifications").insert({
-                                  title: payload.title || "Broadcast",
-                                  body: payload.body,
-                                  target: blastTarget,
-                                  delivery_mode: deliveryMode,
-                                  send_at: nextDate.toISOString(),
-                                  repeat_rule: `weekly:${recurringDay}:${recurringTime}`,
-                                  active: true,
-                                });
+                                setIsTransmitting(true);
+                                try {
+                                  const { error: insErr } = await supabase.from("scheduled_notifications").insert({
+                                    title, body, target: blastTarget, delivery_mode: deliveryMode,
+                                    send_at: sendAt.toISOString(), repeat_rule: null, active: true,
+                                  });
+                                  if (insErr) { alert("Failed to schedule: " + insErr.message); return; }
+                                  await fetchScheduled();
+                                  setBlastMessage('');
+                                } finally { setIsTransmitting(false); }
+                                return;
                               }
+
+                              if (scheduleMode === "recurring") {
+                                if (!recurringDay || !recurringTime) {
+                                  alert("Pick a day and time for the recurring send.");
+                                  return;
+                                }
+                                const dayIndexMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+                                const targetDay = dayIndexMap[recurringDay] ?? 6;
+                                const [hour, minute] = recurringTime.split(":").map(Number);
+                                const next = new Date();
+                                next.setHours(hour ?? 0, minute ?? 0, 0, 0);
+                                let diff = targetDay - next.getDay();
+                                if (diff < 0 || (diff === 0 && next <= new Date())) diff += 7;
+                                next.setDate(next.getDate() + diff);
+
+                                setIsTransmitting(true);
+                                try {
+                                  const { error: insErr } = await supabase.from("scheduled_notifications").insert({
+                                    title, body, target: blastTarget, delivery_mode: deliveryMode,
+                                    send_at: next.toISOString(),
+                                    repeat_rule: `weekly:${recurringDay}:${recurringTime}`,
+                                    active: true,
+                                  });
+                                  if (insErr) { alert("Failed to schedule: " + insErr.message); return; }
+                                  await fetchScheduled();
+                                  setBlastMessage('');
+                                } finally { setIsTransmitting(false); }
+                                return;
+                              }
+
+                              // scheduleMode === "now"
+                              setIsTransmitting(true);
+                              try {
+                                if (deliveryMode === "push" || deliveryMode === "both") {
+                                  const ok = await fireRealPush(title, body, blastTarget);
+                                  if (!ok) alert("Push broadcast failed. Check console for details.");
+                                }
+                                if (deliveryMode === "inapp" || deliveryMode === "both") {
+                                  addInAppNotification(title, body, blastTarget, 'blast');
+                                }
+                                setBlastMessage('');
+                              } finally { setIsTransmitting(false); }
                             }}
                             className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10"
                           >
-                            {isTransmitting ? 'Transmitting...' : 'Send Broadcast'}
+                            {isTransmitting ? 'Sending…' : (scheduleMode === 'now' ? 'Send Broadcast' : 'Save Schedule')}
                           </button>
                           <button
                             onClick={async () => {
@@ -1652,7 +1677,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         <input
                           type="password"
                           className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white mb-3"
-                          placeholder="Enter PIN 1234"
+                          placeholder="Enter PIN"
                           value={resetPin}
                           onChange={(e) => setResetPin(e.target.value)}
                         />
@@ -1706,7 +1731,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                          <div className="flex justify-between items-start mb-10"><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60">Revenue</p><h4 className="text-4xl font-black tracking-tighter leading-none">{paidCount > 0 ? 'Active' : 'Growth'}</h4></div><div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></div></div>
                          <div className="space-y-4">
                           <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Paid Members</span><span>{paidCount}/59</span></div>
-                          <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Total Raised</span><span>£{totalCharityRaised}</span></div>
                           <div className="flex justify-between text-xs font-bold"><span>Prize Pot</span><span>£{currentPot}</span></div>
                         </div>
                       </div>
