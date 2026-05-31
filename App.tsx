@@ -1013,7 +1013,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 };
 
 
-  // In-app notification banner — instant, local only.
+  // In-app notification banner — instant, local only. Caps at 50 to avoid unbounded growth.
   const addInAppNotification = (title: string, body: string, target: string, type: 'blast' | 'reminder' | 'win') => {
     const newNotif: NotificationMessage = {
       id: Math.random().toString(36).slice(2, 11),
@@ -1021,7 +1021,16 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
       type, target, read: false,
     };
-    setNotifications((prev) => [newNotif, ...prev]);
+    setNotifications((prev) => [newNotif, ...prev].slice(0, 50));
+  };
+
+  const dismissNotification = (id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  };
+  const clearAllNotifications = () => {
+    if (!notifications.length) return;
+    if (!confirm("Clear all notifications?")) return;
+    setNotifications([]);
   };
 
   // Real web-push to subscribers. Returns true on success.
@@ -1375,7 +1384,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             ) : null}
           </header>
 
-          <main className="relative z-10 flex-1 p-6 pb-40">
+          <main className="relative z-10 flex-1 p-4 sm:p-6 pb-32 sm:pb-40">
             <div className="max-w-6xl mx-auto">
               {activeTab === 'home' && (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
@@ -1989,19 +1998,19 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
           </main>
 
           {/* NAV BAR */}
-          <nav className="fixed bottom-0 left-0 w-full bg-[#020407]/90 backdrop-blur-3xl border-t border-white/10 pb-safe z-50">
-            <div className="max-w-2xl mx-auto flex items-center justify-between px-8 h-28">
+          <nav className="fixed bottom-0 left-0 w-full bg-[#020407]/95 backdrop-blur-3xl border-t border-white/10 pb-safe z-50">
+            <div className="max-w-2xl mx-auto flex items-center justify-around px-4 sm:px-8 h-20 sm:h-24">
               {(['home', 'balls', 'winners', 'admin'] as Tab[]).map(t => {
                 if (t === 'admin' && !isAdmin) return null;
                 return (
-                  <button key={t} onClick={() => setActiveTab(t)} className={`flex flex-col items-center gap-2 transition-all group ${activeTab === t ? 'scale-110' : 'opacity-40 hover:opacity-100'}`}>
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${activeTab === t ? 'bg-pink-500 text-black shadow-[0_0_25px_rgba(236,72,153,0.3)]' : 'bg-white/5 text-white'}`}>
-                      {t === 'home' && <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3" /></svg>}
-                      {t === 'balls' && <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16m-7 6h7" /></svg>}
-                      {t === 'winners' && <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 3v4M3 5h4M6 17v4m-2-2h4" /></svg>}
-                      {t === 'admin' && <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4" /></svg>}
+                  <button key={t} onClick={() => setActiveTab(t)} className={`flex flex-col items-center gap-1.5 transition-all group ${activeTab === t ? 'scale-110' : 'opacity-50 hover:opacity-100'}`}>
+                    <div className={`w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center transition-all ${activeTab === t ? 'bg-pink-500 text-black shadow-[0_0_25px_rgba(236,72,153,0.3)]' : 'bg-white/5 text-white'}`}>
+                      {t === 'home' && <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3" /></svg>}
+                      {t === 'balls' && <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16m-7 6h7" /></svg>}
+                      {t === 'winners' && <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 3v4M3 5h4M6 17v4m-2-2h4" /></svg>}
+                      {t === 'admin' && <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4" /></svg>}
                     </div>
-                    <span className="text-[8px] font-black uppercase tracking-widest text-white/30 group-hover:text-white transition-colors">{t}</span>
+                    <span className="text-[9px] sm:text-[8px] font-black uppercase tracking-widest text-white/40 group-hover:text-white transition-colors">{t}</span>
                   </button>
                 );
               })}
@@ -2363,17 +2372,27 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
           {/* INBOX */}
           {showInbox && (
             <div className="fixed inset-0 z-[200] flex flex-col bg-[#020407]">
-              <header className="p-8 flex items-center justify-between border-b border-white/10">
-                <h3 className="text-3xl font-black text-white uppercase">Notifications</h3>
-                <button
-                  onClick={() => setShowInbox(false)}
-                  className="text-white/40 hover:text-white"
-                >
-                  ✕
-                </button>
+              <header className="p-6 sm:p-8 flex items-center justify-between border-b border-white/10 gap-3">
+                <h3 className="text-2xl sm:text-3xl font-black text-white uppercase">Notifications</h3>
+                <div className="flex items-center gap-3">
+                  {notifications.length > 0 && (
+                    <button
+                      onClick={clearAllNotifications}
+                      className="text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-red-400"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowInbox(false)}
+                    className="text-white/40 hover:text-white text-xl"
+                  >
+                    ✕
+                  </button>
+                </div>
               </header>
 
-              <div className="flex-1 overflow-y-auto p-8 space-y-6">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-3">
                 {notifications.length === 0 ? (
                   <div className="text-center py-12 text-white/40">
                     <p className="font-black uppercase tracking-widest mb-2 text-xs">No alerts</p>
@@ -2381,9 +2400,21 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   </div>
                 ) : (
                   notifications.map((n) => (
-                    <div key={n.id} className="bg-white/5 border border-white/10 p-6 rounded-2xl">
-                      <h5 className="font-black text-white mb-2">{n.title}</h5>
-                      <p className="text-white/60 text-sm">{n.body}</p>
+                    <div key={n.id} className="bg-white/5 border border-white/10 p-5 rounded-2xl relative group">
+                      <button
+                        onClick={() => dismissNotification(n.id)}
+                        aria-label="Dismiss"
+                        className="absolute top-3 right-3 w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white text-sm flex items-center justify-center opacity-60 group-hover:opacity-100 transition-opacity"
+                      >
+                        ✕
+                      </button>
+                      <div className="pr-8">
+                        <div className="flex items-baseline justify-between gap-2 mb-1">
+                          <h5 className="font-black text-white">{n.title}</h5>
+                          <span className="text-[10px] font-bold uppercase text-white/30 flex-shrink-0">{n.timestamp}</span>
+                        </div>
+                        <p className="text-white/60 text-sm">{n.body}</p>
+                      </div>
                     </div>
                   ))
                 )}
