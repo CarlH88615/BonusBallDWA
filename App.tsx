@@ -45,22 +45,6 @@ interface BallState {
   isWinner?: boolean;
 }
 
-interface BallOwnerDetails {
-  name: string;
-  email?: string; 
-  paidUntil: string;
-  nextDue: string;
-  status: 'paid' | 'overdue' | 'lifetime';
-}
-
-interface DrawResult {
-  date: string;
-  ballNumber: number;
-  winner: string;
-  prizeAmount: number;
-  charityAmount: number;
-}
-
 interface NotificationMessage {
   id: string;
   title: string;
@@ -215,8 +199,6 @@ const App: React.FC = () => {
   const [fullName, setFullName] = useState("");
   const requestRef = useRef<number>(null);
 
-  const [managedBallData, setManagedBallData] = useState<Record<number, BallOwnerDetails>>({});
-  const [pastResults, setPastResults] = useState<DrawResult[]>([]);
   const [totalRollover, setTotalRollover] = useState(0);
   const [members, setMembers] = useState([]);
   const [selectedMemberId, setSelectedMemberId] = useState("");
@@ -227,8 +209,8 @@ const isAdmin = useMemo(() => {
   return sessionEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }, [sessionEmail]);
 
-  const paidCount = useMemo(() => Object.values(managedBallData).filter(b => b.status === 'paid' || b.status === 'lifetime').length, [managedBallData]);
-  const totalRaised = useMemo(() => pastResults.reduce((acc, curr) => acc + curr.charityAmount, 0), [pastResults]);
+  // Count balls paid through the upcoming draw. The legacy managedBallData store was
+  // session-only and never re-hydrated from DB, so it always read as zero.
   const deleteScheduled = async (id) => {
     await supabase
       .from("scheduled_notifications")
@@ -329,6 +311,16 @@ const isAdmin = useMemo(() => {
     return upcomingDrawDateTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [upcomingDrawDateTime]);
 
+  const paidCount = useMemo(() => {
+    if (!upcomingDrawDateTime) return 0;
+    return balls.reduce((acc, ball) => {
+      if (!ball?.paidUntil) return acc;
+      const paid = new Date(ball.paidUntil);
+      paid.setHours(20, 0, 0, 0);
+      return paid >= upcomingDrawDateTime ? acc + 1 : acc;
+    }, 0);
+  }, [balls, upcomingDrawDateTime]);
+
   // Sum of every ball's prepaid weeks × £2 (only counting weeks at or beyond the upcoming draw).
   // This is the truth-source for what should be in the bank from member contributions.
   const expectedFromBalls = useMemo(() => {
@@ -374,7 +366,20 @@ const isAdmin = useMemo(() => {
       year: '2-digit',
     })} 8pm`;
   };
-  const latestWin = pastResults.length > 0 ? pastResults[0] : null;
+  // Pulled from DB-backed winners table (newest completed paid winner). The legacy
+  // pastResults store was session-only and never hydrated, so the Saturday reveal
+  // animation was effectively dead.
+  const latestWin = useMemo(() => {
+    const completed = (winnerRows ?? []).find((r: any) => r.winning_number && r.winner_name);
+    if (!completed) return null;
+    return {
+      date: completed.draw_date,
+      ballNumber: Number(completed.winning_number),
+      winner: completed.winner_name,
+      prizeAmount: Number(completed.amount_won) || 0,
+      charityAmount: 0,
+    };
+  }, [winnerRows]);
   const handleRecordResult = async () => {
     if (!selectedResultBall) return;
     const ball = balls.find(b => b.number === selectedResultBall);
@@ -525,8 +530,6 @@ const isAdmin = useMemo(() => {
       if (ballsReset.error) throw ballsReset.error;
 
       setBalls(freshBalls);
-      setManagedBallData({});
-      setPastResults([]);
       setTotalRollover(0);
       setRolloverAmount(0);
       setSelectedBallNum(null);
@@ -988,15 +991,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       console.error("❌ Failed to persist assignment", error);
       return;
     }
-  setManagedBallData(prev => ({
-    ...prev,
-    [num]: {
-      name: assignmentName.trim(),
-      status: 'paid',
-        paidUntil: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
-        nextDue: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
-      }
-    }));
   setBalls(updatedBalls);
   console.log("✅ assign persisted");
   sendPush("Ball Assigned", `${assignmentName} has been assigned Ball #${num}`, "admin", "reminder");
@@ -1061,25 +1055,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     const num = adminAction?.ballNum;
     const weeks = parseInt(paymentWeeks);
     if (!num || isNaN(weeks) || weeks < 1) return;
-
-    setManagedBallData(prev => {
-      const current = prev[num];
-      if (!current) return prev;
-      
-      const currentDue = new Date(current.nextDue);
-      const baseDate = isNaN(currentDue.getTime()) ? new Date() : currentDue;
-      const nextDueDate = new Date(baseDate.getTime() + (weeks * 7 * 24 * 60 * 60 * 1000));
-      
-      return {
-        ...prev,
-        [num]: {
-          ...current,
-          status: 'paid',
-          paidUntil: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
-          nextDue: nextDueDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
-        }
-      };
-    });
 
     const selectedBall = balls.find(b => b.number === num);
     const targetOwner = applyToAllOwner ? selectedBall?.owner : null;
@@ -1147,58 +1122,9 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     setSelectedBallNum(null);
   };
 
-  const commitResult = () => {
-    if (!isAdmin) return;
-    const num = parseInt(resultBallNum);
-    if (isNaN(num) || num < 1 || num > 59) return alert("Invalid ball number.");
-
-    const winnerData = managedBallData[num];
-    const isPaid = winnerData && (winnerData.status === 'paid' || winnerData.status === 'lifetime');
-    
-    let winnerName = "ROLLOVER";
-    let prize = 0;
-    let charity = 0;
-    let newRollover = 0;
-
-    if (isPaid) {
-      winnerName = winnerData!.name;
-      prize = currentPot;
-      newRollover = 0;
-    } else {
-      winnerName = winnerData ? `${winnerData.name} (UNPAID)` : "VACANT";
-      charity = 0;
-      newRollover = currentPot;
-    }
-
-    const newResult: DrawResult = {
-      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
-      ballNumber: num,
-      winner: winnerName,
-      prizeAmount: prize,
-      charityAmount: charity,
-    };
-
-    setPastResults(prev => [newResult, ...prev]);
-    setTotalRollover(newRollover);
-    sendPush("Draw Recorded", `Ball #${num} won. Winner: ${winnerName}`, "all", "win");
-    setAdminAction(null);
-    setResultBallNum('');
-  };
-
   const handleUpdatePaymentInitiate = (ballNum: number) => {
     if (!isAdmin) return;
     setAdminAction({ type: 'payment', ballNum });
-  };
-
-  const handleRemoveBall = (num: number) => {
-    if (!isAdmin) return;
-    if (confirm(`Are you sure you want to remove the owner of Ball #${num}?`)) {
-      setManagedBallData(prev => {
-        const d = { ...prev };
-        delete d[num];
-        return d;
-      });
-    }
   };
 
   const hasUnread = notifications.some(n => !n.read);
@@ -1780,7 +1706,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                          <div className="flex justify-between items-start mb-10"><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60">Revenue</p><h4 className="text-4xl font-black tracking-tighter leading-none">{paidCount > 0 ? 'Active' : 'Growth'}</h4></div><div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></div></div>
                          <div className="space-y-4">
                           <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Paid Members</span><span>{paidCount}/59</span></div>
-                          <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Total Raised</span><span>£{totalRaised}</span></div>
+                          <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Total Raised</span><span>£{totalCharityRaised}</span></div>
                           <div className="flex justify-between text-xs font-bold"><span>Prize Pot</span><span>£{currentPot}</span></div>
                         </div>
                       </div>
