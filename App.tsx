@@ -313,6 +313,16 @@ const isAdmin = useMemo(() => {
     return upcomingDrawDateTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [upcomingDrawDateTime]);
 
+  // Consecutive most-recent draws with no paid winner. Drives the rollover-streak banner.
+  const rolloverStreak = useMemo(() => {
+    let streak = 0;
+    for (const r of winnerRows as any[]) {
+      if (!r.winner_name || Number(r.amount_won) === 0) streak += 1;
+      else break;
+    }
+    return streak;
+  }, [winnerRows]);
+
   // Balls that have an owner but aren't covered for the upcoming draw. Surfaces them at
   // the top of admin so the admin can chase payment without scrolling the full grid.
   const ballsDueThisWeek = useMemo(() => {
@@ -1470,26 +1480,27 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 <div className="animate-in fade-in zoom-in-95 duration-500 space-y-10">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 flex items-center justify-between shadow-xl"><div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Upcoming Draw</p><p className="text-2xl font-black text-white">{formattedDrawDate}</p></div><div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-white/20 font-black text-xs">Sat</div></div>
-                    <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 shadow-xl w-full">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        {totalRollover > 0 && (
-                          <div className="mb-6 text-center w-full">
-                            <div className="inline-block px-6 py-2 rounded-full bg-gradient-to-r from-pink-500 via-orange-400 to-yellow-400 animate-pulse shadow-[0_0_25px_rgba(255,120,0,0.6)]">
-                              <span className="text-black font-black tracking-widest text-sm md:text-base">
-                                🔥 ROLLOVER ACTIVE 🔥
-                              </span>
-                            </div>
-                          </div>
-                        )}
+                    <div className={`relative border rounded-3xl p-6 sm:p-8 shadow-xl w-full overflow-hidden ${totalRollover > 0 ? 'bg-gradient-to-br from-orange-500/20 via-yellow-500/10 to-transparent border-yellow-500/30' : 'bg-white/[0.03] border-white/10'}`}>
+                      {totalRollover > 0 && (
+                        <div className="absolute -top-2 -right-2 px-3 py-1 rounded-full bg-gradient-to-r from-pink-500 via-orange-400 to-yellow-400 animate-pulse shadow-[0_0_25px_rgba(255,120,0,0.6)]">
+                          <span className="text-black font-black tracking-widest text-[10px]">🔥 ROLLOVER</span>
+                        </div>
+                      )}
+                      <div className="flex items-end justify-between gap-3">
                         <div>
                           <p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Active Prize</p>
-                          <p className="text-4xl font-black text-white tracking-tighter">£{currentPot}</p>
+                          <p className={`text-5xl sm:text-6xl font-black tracking-tighter ${totalRollover > 0 ? 'text-yellow-400 drop-shadow-[0_0_25px_rgba(250,204,21,0.4)]' : 'text-white'}`}>£{currentPot}</p>
+                          {rolloverStreak >= 2 && (
+                            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-orange-400 mt-2">
+                              {rolloverStreak} weeks of rollover 🔥
+                            </p>
+                          )}
                         </div>
-                        <div className="self-start sm:self-auto px-3 py-1 bg-pink-500 text-black text-[10px] font-black rounded-full uppercase">Live</div>
+                        <div className="self-start px-3 py-1 bg-pink-500 text-black text-[10px] font-black rounded-full uppercase">Live</div>
                       </div>
                       <div className="mt-4 space-y-1 text-xs text-white/60 font-bold uppercase tracking-widest">
                         <div className="flex justify-between">
-                          <span>Paid this draw</span>
+                          <span>This draw</span>
                           <span>£{currentPot - totalRollover}</span>
                         </div>
                         <div className="flex justify-between">
@@ -1539,11 +1550,28 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <p className="text-xs text-white/30">Winners will appear here after the first draw is recorded.</p>
                         </div>
                       ) : winnerRows.map((r, i) => (
-                        <div key={i} className="bg-white/[0.03] backdrop-blur-xl border border-white/10 p-8 rounded-[2rem] flex items-center gap-10 hover:bg-white/5 transition-all group">
-                          <LotteryBall number={r.winning_number} className="w-20 h-20 group-hover:rotate-12 transition-transform" />
-                          <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                            <div><p className="text-[10px] font-black uppercase text-pink-500 tracking-widest mb-1">{r.draw_date}</p><h4 className="text-3xl font-black text-white tracking-tighter leading-none">{r.winner_name ?? 'VACANT'}</h4></div>
-                            <div className="text-right"><p className="text-[10px] font-black uppercase text-white/30 mb-1">Awarded</p><p className="text-3xl font-black text-yellow-500 tracking-tighter">£{r.amount_won}</p></div>
+                        <div key={i} className="bg-white/[0.03] backdrop-blur-xl border border-white/10 p-6 md:p-8 rounded-[2rem] flex items-center gap-6 md:gap-10 hover:bg-white/5 transition-all group">
+                          <LotteryBall number={r.winning_number} className="w-16 h-16 md:w-20 md:h-20 group-hover:rotate-12 transition-transform flex-shrink-0" />
+                          <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-4 min-w-0">
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-black uppercase text-pink-500 tracking-widest mb-1">{r.draw_date}</p>
+                              <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter leading-none truncate">{r.winner_name ?? 'VACANT'}</h4>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <div className="text-right">
+                                <p className="text-[10px] font-black uppercase text-white/30 mb-1">Awarded</p>
+                                <p className="text-2xl md:text-3xl font-black text-yellow-500 tracking-tighter">£{r.amount_won}</p>
+                              </div>
+                              {i === 0 && r.winner_name && (
+                                <button
+                                  onClick={() => startRevealSequence()}
+                                  title="Replay reveal"
+                                  className="w-10 h-10 rounded-full bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 flex items-center justify-center flex-shrink-0"
+                                >
+                                  ▶
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -2292,20 +2320,42 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
               >
                 ✕
               </button>
-              <LotteryBall number={selectedBallNum} className="w-56 h-56 mx-auto mb-8" />
-              {selectedBall && (
-                <div className="space-y-2 text-white">
-                  <p className="text-lg font-black">
-                    {selectedBall.owner ?? 'Unassigned'}
-                    {!isBallPaidForDraw(selectedBall) && selectedBall.owner ? ' ⚠️' : ''}
-                  </p>
-                  <p className="text-sm text-white/70">
-                    {isBallPaidForDraw(selectedBall)
-                      ? `Paid until and including ${formatPaidUntil(selectedBall.paidUntil)}`
-                      : 'Expired'}
-                  </p>
-                </div>
-              )}
+              <LotteryBall number={selectedBallNum} className="w-40 h-40 sm:w-56 sm:h-56 mx-auto mb-6" />
+              {selectedBall && (() => {
+                const weeks = weeksCoveredFor(selectedBall);
+                const isPaid = weeks > 0;
+                const winsHere = winnerRows.filter((r: any) => Number(r.winning_number) === selectedBallNum && r.winner_name);
+                return (
+                  <div className="space-y-4 text-white">
+                    <p className="text-2xl font-black tracking-tighter">
+                      {selectedBall.owner ?? `Vacant Ball #${selectedBallNum}`}
+                    </p>
+                    <div className={`inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full ${isPaid ? 'bg-green-500/10 text-green-400 border border-green-500/30' : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
+                      {isPaid
+                        ? `Covered · ${weeks} week${weeks === 1 ? '' : 's'} left`
+                        : selectedBall.owner ? 'Not covered' : 'Open for assignment'}
+                    </div>
+                    {isPaid && (
+                      <p className="text-xs text-white/50">Paid through {formatPaidUntil(selectedBall.paidUntil)}</p>
+                    )}
+                    {winsHere.length > 0 && (
+                      <div className="mt-6 pt-6 border-t border-white/10 text-left">
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-pink-400 mb-3">
+                          Win history · {winsHere.length} time{winsHere.length === 1 ? '' : 's'}
+                        </p>
+                        <ul className="space-y-1.5 text-xs">
+                          {winsHere.slice(0, 5).map((r: any) => (
+                            <li key={r.id} className="flex justify-between text-white/70">
+                              <span>{r.draw_date}</span>
+                              <span className="text-white/90">{r.winner_name} · £{r.amount_won}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
