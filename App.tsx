@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LotteryBall } from './components/LotteryBall';
 import { supabase } from "./services/supabase";
+import type { BallState, NotificationMessage, Tab, AuthMode } from './types';
 
 const AnimatedBallsBackground = ({ smallBalls }: { smallBalls: BallState[] }) => {
   return (
@@ -34,34 +35,13 @@ const AnimatedBallsBackground = ({ smallBalls }: { smallBalls: BallState[] }) =>
 
 
 
-interface BallState {
-  id: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  num: number;
-  isWinner?: boolean;
-}
-
-interface NotificationMessage {
-  id: string;
-  title: string;
-  body: string;
-  timestamp: string;
-  type: 'blast' | 'reminder' | 'win';
-  target: string;
-  read: boolean;
-}
-
-type Tab = 'home' | 'balls' | 'winners' | 'admin';
-
-// Auth flow modes
-type AuthMode = "login" | "register" | "forgot" | "reset";
-
 const ADMIN_EMAIL = 'Carlwhalliday@icloud.com';
 const TEST_EMAIL = 'test@user.com';
+
+// Pulled from env so the PIN isn't visible in source. Set VITE_ADMIN_PIN in .env.local
+// and in the Netlify env. If unset, hard reset is disabled.
+const ADMIN_PIN = ((import.meta as any).env?.VITE_ADMIN_PIN ?? "") as string;
+const VAPID_PUBLIC_KEY = ((import.meta as any).env?.VITE_VAPID_PUBLIC_KEY ?? "") as string;
 
 // Draws are locked to Saturday 20:00 UK-local. These helpers keep all date math in local
 // time so we never trip on UTC/BST shifts.
@@ -121,6 +101,13 @@ const App: React.FC = () => {
 
   // PLATFORM STATE - STARTING BLANK
   const [notifications, setNotifications] = useState<NotificationMessage[]>([]);
+  const [toast, setToast] = useState<{ kind: 'error' | 'success' | 'info'; message: string } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (kind: 'error' | 'success' | 'info', message: string) => {
+    setToast({ kind, message });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3500);
+  };
   const [blastMessage, setBlastMessage] = useState('');
   const [blastTarget, setBlastTarget] = useState<'all' | 'unpaid' | 'specific'>('all');
   const [showInbox, setShowInbox] = useState(false);
@@ -238,7 +225,7 @@ const isAdmin = useMemo(() => {
     if (!isAdmin) return;
     const raw = parseFloat(newEntryAmount);
     if (isNaN(raw) || raw === 0) {
-      alert("Enter a non-zero amount.");
+      showToast("error", "Enter a non-zero amount.");
       return;
     }
     // Adjustments accept signed input; other types accept positive magnitudes only.
@@ -255,7 +242,7 @@ const isAdmin = useMemo(() => {
         }]);
       if (insertErr) {
         console.error("❌ Insert manual entry failed", insertErr);
-        alert("Failed to save entry.");
+        showToast("error", "Failed to save entry.");
         return;
       }
       await adjustBank(ledgerEffectOnBank(newEntryType, amount));
@@ -278,7 +265,7 @@ const isAdmin = useMemo(() => {
         .eq("id", row.id);
       if (delErr) {
         console.error("❌ Delete ledger entry failed", delErr);
-        alert("Failed to delete.");
+        showToast("error", "Failed to delete.");
         return;
       }
       await adjustBank(-ledgerEffectOnBank(row.type, row.amount));
@@ -491,8 +478,12 @@ const isAdmin = useMemo(() => {
   };
   const handleHardReset = async () => {
     if (!isAdmin) return;
-    if (resetPin !== "1234") {
-      alert("Incorrect PIN");
+    if (!ADMIN_PIN) {
+      showToast("error", "Hard reset disabled — VITE_ADMIN_PIN not configured.");
+      return;
+    }
+    if (resetPin !== ADMIN_PIN) {
+      showToast("error", "Incorrect PIN");
       return;
     }
     if (!confirm("This cannot be undone. Proceed with hard reset?")) return;
@@ -539,7 +530,7 @@ const isAdmin = useMemo(() => {
       loadBallsFromDb();
     } catch (err) {
       console.error("❌ Hard reset failed", err);
-      alert("Reset failed. Check console for details.");
+      showToast("error", "Reset failed. Check console for details.");
     } finally {
       setIsResetting(false);
       setResetPin('');
@@ -559,7 +550,7 @@ const isAdmin = useMemo(() => {
   });
 
   if (error) {
-    alert(error.message);
+    showToast("error", error.message);
     return;
   }
 
@@ -584,7 +575,7 @@ const isAdmin = useMemo(() => {
   });
 
   if (error) {
-    alert(error.message);
+    showToast("error", error.message);
     return;
   }
 
@@ -605,7 +596,7 @@ const isAdmin = useMemo(() => {
   if (sessionData.session) {
     sendPush("Welcome", "Your account has been successfully created.", "admin", "reminder");
   } else {
-    alert("Account created. Please check your email to confirm, then log in.");
+    showToast("info", "Account created. Please check your email to confirm, then log in.");
   }
 };
 
@@ -882,11 +873,11 @@ const handleForgotPassword = async (e: React.FormEvent) => {
   });
 
   if (error) {
-    alert(error.message);
+    showToast("error", error.message);
     return;
   }
 
-  alert("Password reset email sent.");
+  showToast("success", "Password reset email sent.");
   setAuthMode("login");
 };
 
@@ -899,11 +890,11 @@ const handleResetPassword = async (e: React.FormEvent) => {
   const { error } = await supabase.auth.updateUser({ password });
 
   if (error) {
-    alert(error.message);
+    showToast("error", error.message);
     return;
   }
 
-  alert("Password updated. You can now log in.");
+  showToast("success", "Password updated. You can now log in.");
   setAuthMode("login");
 };
 
@@ -938,12 +929,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
   const { error } = await supabase.auth.updateUser({ password: newPassword.trim() });
   setIsUpdatingPassword(false);
   if (error) {
-    alert(error.message);
+    showToast("error", error.message);
     return;
   }
   setIsRecoveryMode(false);
   setNewPassword('');
-  alert("Password updated.");
+  showToast("success", "Password updated.");
 };
 
 
@@ -1044,17 +1035,20 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
         : b
     );
 
-    console.log("Updated balls payload:", updatedBalls);
-    console.log("Reset payload:", JSON.stringify(updatedBalls, null, 2));
-
-    const { data, error } = await supabase
+    if (!bonusBallRowId) {
+      showToast("error", "Ball data not loaded yet.");
+      return;
+    }
+    const { error } = await supabase
       .from("bonus_ball_data")
       .update({ state: { balls: updatedBalls } })
-      .eq("id", 1)
-      .select(); // keep single-row structure
-
-    console.log("Reset result:", { data, error });
-    if (error) return;
+      .eq("id", bonusBallRowId)
+      .select();
+    if (error) {
+      showToast("error", "Failed to clear ball.");
+      return;
+    }
+    showToast("success", `Ball #${selectedBall.number} cleared.`);
 
     setBalls(updatedBalls);
     setShowAssignModal(false);
@@ -1165,6 +1159,13 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
   return (
     <div className="relative min-h-screen bg-[#020407] overflow-hidden flex flex-col font-display z-10">
       <AnimatedBallsBackground smallBalls={smallBalls} />
+      {/* TOAST */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] max-w-[90vw] sm:max-w-md flex items-center gap-3 bg-neutral-900 border border-neutral-700 rounded-2xl px-5 py-3 shadow-2xl">
+          <span className={`text-xl leading-none ${toast.kind === 'error' ? 'text-red-400' : toast.kind === 'success' ? 'text-green-400' : 'text-pink-400'}`}>●</span>
+          <span className="text-sm text-white">{toast.message}</span>
+        </div>
+      )}
       {/* WIN REVEAL */}
       {showWinReveal && (
         <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-black overflow-hidden">
@@ -1217,15 +1218,14 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 onClick={async () => {
                   const perm = await Notification.requestPermission();
                   if (perm !== "granted") {
-                    alert("Notifications permission not granted.");
+                    showToast("error", "Notifications permission not granted.");
                     return;
                   }
 
                   const reg = await navigator.serviceWorker.ready;
                   const sub = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
-                    // VAPID key comes next step
-                    applicationServerKey: "BEsePk0iViWt7yB2ofqMomHnxYgE7fiAgwHl4nLS1OPzKJE0gsILh4mvoDxwQW_c_2vSflXjn57oXXkPfhBltyw",
+                    applicationServerKey: VAPID_PUBLIC_KEY,
                   });
 
                   console.log("Push subscription:", JSON.stringify(sub));
@@ -1235,7 +1235,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   } = await supabase.auth.getUser();
 
                   if (userErr || !user) {
-                    alert("Not logged in.");
+                    showToast("error", "Not logged in.");
                     return;
                   }
 
@@ -1245,7 +1245,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   const auth = json.keys?.auth;
 
                   if (!endpoint || !p256dh || !auth) {
-                    alert("Subscription missing required fields.");
+                    showToast("error", "Subscription missing required fields.");
                     return;
                   }
 
@@ -1262,11 +1262,11 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   );
 
                   if (upsertErr) {
-                    alert(upsertErr.message);
+                    showToast("error", upsertErr.message);
                     return;
                   }
 
-                  alert("Subscribed and saved!");
+                  showToast("success", "Subscribed — you'll receive draw notifications.");
 
                 }}
                 className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
@@ -1282,12 +1282,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   const id = data.user?.id;
 
                   if (!id) {
-                    alert("No user (not logged in)");
+                    showToast("error", "No user (not logged in)");
                     return;
                   }
 
                   await navigator.clipboard.writeText(id);
-                  alert("Copied user id: " + id);
+                  showToast("success", "User ID copied to clipboard");
                 }}
                 className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
               >
@@ -1364,23 +1364,23 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       </div>
                     </div>
                   </div>
-                  <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-[3rem] p-10 md:p-14 shadow-2xl">
-                    <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-6">
+                  <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-10 md:p-14 shadow-2xl">
+                    <div className="grid grid-cols-3 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-4 sm:gap-6">
                       {balls.map((ball) => {
                         const num = ball.number;
                         const ownerName = ball?.owner;
                         const isPaid = isBallPaidForDraw(ball);
                         return (
-                          <div key={num} onClick={() => setSelectedBallNum(num)} className="group cursor-pointer transition-all flex flex-col items-center gap-2">
+                          <div key={num} onClick={() => setSelectedBallNum(num)} className="group cursor-pointer transition-all flex flex-col items-center gap-1.5">
                             <LotteryBall number={num} className="w-full group-hover:scale-110 transition-transform" opacity={isPaid ? 1 : 0.1} />
-                            <p className={`text-[8px] font-black uppercase truncate w-full text-center mt-1 transition-colors ${isPaid ? 'text-white/80' : 'text-white/20'}`}>
+                            <p className={`text-[10px] sm:text-[8px] font-black uppercase truncate w-full text-center mt-1 transition-colors ${isPaid ? 'text-white/80' : 'text-white/20'}`}>
                               {ownerName
                                 ? `${ownerName}${isPaid ? '' : ' ⚠️'}`
                                 : 'Open'}
                             </p>
-                            <p className="text-[8px] font-bold uppercase text-center text-white/30">
+                            <p className="hidden sm:block text-[8px] font-bold uppercase text-center text-white/30">
                               {isPaid
-                                ? `Paid until and including ${formatPaidUntil(ball.paidUntil)}`
+                                ? `Paid until ${formatPaidUntil(ball.paidUntil)}`
                                 : 'Expired'}
                             </p>
                           </div>
@@ -1399,7 +1399,10 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                    </div>
                    <div className="space-y-4">
                       {winnerRows.length === 0 ? (
-                        <div className="text-center py-20 opacity-20"><p className="font-black uppercase tracking-widest">No results yet</p></div>
+                        <div className="text-center py-20 text-white/40">
+                          <p className="font-black uppercase tracking-widest mb-2">No results yet</p>
+                          <p className="text-xs text-white/30">Winners will appear here after the first draw is recorded.</p>
+                        </div>
                       ) : winnerRows.map((r, i) => (
                         <div key={i} className="bg-white/[0.03] backdrop-blur-xl border border-white/10 p-8 rounded-[2rem] flex items-center gap-10 hover:bg-white/5 transition-all group">
                           <LotteryBall number={r.winning_number} className="w-20 h-20 group-hover:rotate-12 transition-transform" />
@@ -1555,12 +1558,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
                               if (scheduleMode === "once") {
                                 if (!scheduleOnceDate || !scheduleOnceTime) {
-                                  alert("Pick a date and time for the scheduled send.");
+                                  showToast("error", "Pick a date and time for the scheduled send.");
                                   return;
                                 }
                                 const sendAt = new Date(`${scheduleOnceDate}T${scheduleOnceTime}`);
                                 if (isNaN(sendAt.getTime()) || sendAt <= new Date()) {
-                                  alert("Scheduled time must be in the future.");
+                                  showToast("error", "Scheduled time must be in the future.");
                                   return;
                                 }
                                 setIsTransmitting(true);
@@ -1569,7 +1572,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                     title, body, target: blastTarget, delivery_mode: deliveryMode,
                                     send_at: sendAt.toISOString(), repeat_rule: null, active: true,
                                   });
-                                  if (insErr) { alert("Failed to schedule: " + insErr.message); return; }
+                                  if (insErr) { showToast("error", "Failed to schedule: " + insErr.message); return; }
                                   await fetchScheduled();
                                   setBlastMessage('');
                                 } finally { setIsTransmitting(false); }
@@ -1578,7 +1581,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
                               if (scheduleMode === "recurring") {
                                 if (!recurringDay || !recurringTime) {
-                                  alert("Pick a day and time for the recurring send.");
+                                  showToast("error", "Pick a day and time for the recurring send.");
                                   return;
                                 }
                                 const dayIndexMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -1598,7 +1601,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                                     repeat_rule: `weekly:${recurringDay}:${recurringTime}`,
                                     active: true,
                                   });
-                                  if (insErr) { alert("Failed to schedule: " + insErr.message); return; }
+                                  if (insErr) { showToast("error", "Failed to schedule: " + insErr.message); return; }
                                   await fetchScheduled();
                                   setBlastMessage('');
                                 } finally { setIsTransmitting(false); }
@@ -1610,7 +1613,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                               try {
                                 if (deliveryMode === "push" || deliveryMode === "both") {
                                   const ok = await fireRealPush(title, body, blastTarget);
-                                  if (!ok) alert("Push broadcast failed. Check console for details.");
+                                  if (!ok) showToast("error", "Push broadcast failed. Check console for details.");
                                 }
                                 if (deliveryMode === "inapp" || deliveryMode === "both") {
                                   addInAppNotification(title, body, blastTarget, 'blast');
@@ -1633,10 +1636,10 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
                               const text = await res.text();
                               if (!res.ok) {
-                                alert(text);
+                                showToast("error", text);
                                 return;
                               }
-                              alert(text);
+                              showToast("success", text);
                             }}
                             className="w-full py-4 bg-white/10 text-white font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-white/20 transition-all"
                           >
@@ -2018,7 +2021,10 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     <p className="text-white/50 text-xs">
                       Status: {(() => {
                         const ball = balls.find(b => b.number === selectedResultBall);
-                        return ball?.owner ? 'Assigned' : 'Unassigned';
+                        if (!ball?.owner) return 'Vacant — full pot will roll to next draw';
+                        return isBallPaidForDraw(ball)
+                          ? `Paid up — ${ball.owner} will receive the prize`
+                          : `Unpaid — ${ball.owner} forfeits, full pot rolls over`;
                       })()}
                     </p>
                     <select
@@ -2027,10 +2033,15 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       onChange={(e) => setSelectedResultBall(e.target.value ? Number(e.target.value) : null)}
                     >
                       <option value="">Select ball</option>
-                      {balls.map(b => (
-                        <option key={b.number} value={b.number}>{b.number} {b.owner ? `- ${b.owner}` : '- Vacant'}</option>
-                      ))}
+                      {balls.map(b => {
+                        const marker = !b.owner ? '○' : isBallPaidForDraw(b) ? '✓' : '✗';
+                        const label = b.owner ? `${b.owner}` : 'Vacant';
+                        return <option key={b.number} value={b.number}>{marker} {b.number} — {label}</option>;
+                      })}
                     </select>
+                    <p className="text-[10px] text-white/30 leading-snug">
+                      ✓ paid · ✗ unpaid · ○ vacant
+                    </p>
                     <div className="flex gap-3 justify-center">
                       <button
                         onClick={() => { handleRecordResult(); setAdminAction(null); }}
@@ -2098,7 +2109,10 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
               <div className="flex-1 overflow-y-auto p-8 space-y-6">
                 {notifications.length === 0 ? (
-                  <p className="text-center text-white/30 uppercase text-xs">No alerts</p>
+                  <div className="text-center py-12 text-white/40">
+                    <p className="font-black uppercase tracking-widest mb-2 text-xs">No alerts</p>
+                    <p className="text-xs text-white/30">In-app notifications from admin will appear here.</p>
+                  </div>
                 ) : (
                   notifications.map((n) => (
                     <div key={n.id} className="bg-white/5 border border-white/10 p-6 rounded-2xl">
