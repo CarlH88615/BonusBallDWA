@@ -12,3 +12,8 @@
 [[scheduled.functions]]
   name = "push-reminders"
   schedule = "*/1 * * * *"
+
+# Proactive payment + draw-day reminders. Function itself bails on non-target days.
+[[scheduled.functions]]
+  name = "weekly-reminders"
+  schedule = "0 9 * * 4,6"
