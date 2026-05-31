@@ -101,6 +101,20 @@ const App: React.FC = () => {
 
   // PLATFORM STATE - STARTING BLANK
   const [notifications, setNotifications] = useState<NotificationMessage[]>([]);
+  const [noticeDismissed, setNoticeDismissed] = useState<boolean>(
+    typeof window !== 'undefined' && localStorage.getItem('notice_v1_dismissed') === 'true'
+  );
+  const [seenOnboarding, setSeenOnboarding] = useState<boolean>(
+    typeof window !== 'undefined' && localStorage.getItem('onboarding_v1_seen') === 'true'
+  );
+  const dismissNotice = () => {
+    localStorage.setItem('notice_v1_dismissed', 'true');
+    setNoticeDismissed(true);
+  };
+  const completeOnboarding = () => {
+    localStorage.setItem('onboarding_v1_seen', 'true');
+    setSeenOnboarding(true);
+  };
   const [toast, setToast] = useState<{ kind: 'error' | 'success' | 'info'; message: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = (kind: 'error' | 'success' | 'info', message: string) => {
@@ -297,6 +311,22 @@ const isAdmin = useMemo(() => {
     if (!upcomingDrawDateTime) return '';
     return upcomingDrawDateTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [upcomingDrawDateTime]);
+
+  const myBalls = useMemo(() => {
+    if (!sessionEmail) return [];
+    const me = sessionEmail.toLowerCase();
+    return balls.filter((b) => b?.email && b.email.toLowerCase() === me);
+  }, [balls, sessionEmail]);
+
+  // Returns number of draws this ball is paid through, counting the upcoming draw as 1.
+  const weeksCoveredFor = (ball: any): number => {
+    if (!ball?.paidUntil || !upcomingDrawDateTime) return 0;
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const paid = new Date(ball.paidUntil);
+    paid.setHours(20, 0, 0, 0);
+    if (paid < upcomingDrawDateTime) return 0;
+    return Math.floor((paid.getTime() - upcomingDrawDateTime.getTime()) / weekMs) + 1;
+  };
 
   const paidCount = useMemo(() => {
     if (!upcomingDrawDateTime) return 0;
@@ -1300,34 +1330,100 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             <div className="max-w-6xl mx-auto">
               {activeTab === 'home' && (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
-                  <div className="bg-red-500/10 border border-red-500/20 rounded-[2rem] p-8 md:p-10 shadow-2xl">
-                    <div className="flex items-start gap-6">
-                      <div className="w-12 h-12 rounded-2xl bg-red-500 flex items-center justify-center flex-shrink-0 text-white shadow-lg"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div>
-                      <div>
-                        <h4 className="text-xl font-black text-white tracking-tighter uppercase mb-2">Heads Up</h4>
-                        <p className="text-white/60 text-sm leading-relaxed max-w-xl">Unpaid winners forfeit the full prize — 100% rolls over to the next draw. Please keep your entries current.</p>
+                  {!noticeDismissed && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-[2rem] p-6 md:p-10 shadow-2xl relative">
+                      <button onClick={dismissNotice} aria-label="Dismiss" className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white text-sm flex items-center justify-center">✕</button>
+                      <div className="flex items-start gap-4 sm:gap-6 pr-8">
+                        <div className="w-12 h-12 rounded-2xl bg-red-500 flex items-center justify-center flex-shrink-0 text-white shadow-lg"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div>
+                        <div>
+                          <h4 className="text-xl font-black text-white tracking-tighter uppercase mb-2">Heads Up</h4>
+                          <p className="text-white/60 text-sm leading-relaxed max-w-xl">Unpaid winners forfeit the full prize — 100% rolls over to the next draw. Please keep your entries current.</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="md:col-span-2 bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-10 shadow-2xl space-y-8">
-                      <div><h3 className="text-4xl font-black text-white tracking-tighter mb-4">The Guidelines</h3><p className="text-white/60 text-sm leading-relaxed max-w-lg">Charity initiative for <strong>Daddys With Angels</strong>. £2 per ball, drawn every Saturday night using the National Lottery Bonus Ball.</p></div>
+                  )}
+
+                  {/* PERSONALISED HERO — signed-in users with balls */}
+                  {sessionEmail && myBalls.length > 0 && (
+                    <div className="bg-gradient-to-br from-pink-500/20 via-pink-500/10 to-transparent border border-pink-500/20 rounded-[2.5rem] p-6 md:p-10 shadow-2xl">
+                      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-pink-400 mb-2">Welcome back</p>
+                      <h3 className="text-3xl md:text-4xl font-black text-white tracking-tighter mb-6">
+                        You own {myBalls.length === 1 ? 'Ball' : `${myBalls.length} Balls`} {myBalls.map((b) => `#${b.number}`).join(', ')}
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {myBalls.map((b) => {
+                          const weeks = weeksCoveredFor(b);
+                          const isPaid = weeks > 0;
+                          return (
+                            <button
+                              key={b.number}
+                              onClick={() => setSelectedBallNum(b.number)}
+                              className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${isPaid ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-red-500/10 border-red-500/20 hover:bg-red-500/15'}`}
+                            >
+                              <LotteryBall number={b.number} className="w-12 h-12 flex-shrink-0" opacity={isPaid ? 1 : 0.4} />
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-xs font-black uppercase tracking-widest mb-0.5 ${isPaid ? 'text-pink-400' : 'text-red-400'}`}>
+                                  {isPaid ? `Covered · ${weeks} week${weeks === 1 ? '' : 's'} left` : 'Not covered'}
+                                </p>
+                                <p className="text-sm text-white font-semibold truncate">
+                                  {isPaid ? `Paid through ${formatPaidUntil(b.paidUntil)}` : 'Pay to enter the next draw'}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* LATEST DRAW RESULT */}
+                  {latestWin && (
+                    <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-6 md:p-8 shadow-2xl flex items-center gap-6">
+                      <LotteryBall number={latestWin.ballNumber} className="w-20 h-20 md:w-24 md:h-24 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-pink-400 mb-1">Last Draw · {latestWin.date}</p>
+                        <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter truncate">{latestWin.winner}</h4>
+                        <p className="text-yellow-500 font-black text-xl">£{latestWin.prizeAmount}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ONBOARDING — first-time signed-in users */}
+                  {sessionEmail && !seenOnboarding && (
+                    <div className="bg-pink-500/10 border border-pink-500/20 rounded-[2.5rem] p-6 md:p-8 shadow-2xl relative">
+                      <button onClick={completeOnboarding} aria-label="Dismiss" className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white text-sm flex items-center justify-center">✕</button>
+                      <h4 className="text-xl font-black text-white tracking-tighter uppercase mb-3">Getting Started</h4>
+                      <ol className="space-y-3 text-sm text-white/70 list-decimal list-inside">
+                        <li>Browse the <button onClick={() => setActiveTab('balls')} className="text-pink-400 underline underline-offset-2">Balls tab</button> to see what's available.</li>
+                        <li>Ask Carl to assign a ball to you and mark you as paid.</li>
+                        <li>Tap the bell icon in the header to subscribe to push notifications so you get the result on Saturday.</li>
+                      </ol>
+                      <button onClick={completeOnboarding} className="mt-5 text-xs font-black uppercase tracking-widest text-pink-400 hover:text-pink-300">Got it →</button>
+                    </div>
+                  )}
+
+                  {/* GUIDELINES — show for not-logged-in or users with no balls */}
+                  {(!sessionEmail || myBalls.length === 0) && (
+                    <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-6 md:p-10 shadow-2xl space-y-8">
+                      <div>
+                        <h3 className="text-3xl md:text-4xl font-black text-white tracking-tighter mb-4">The Guidelines</h3>
+                        <p className="text-white/60 text-sm leading-relaxed max-w-lg">
+                          A family initiative — £2 per ball, drawn every Saturday night using the National Lottery Bonus Ball.
+                          {sessionEmail && myBalls.length === 0 && ' Ask Carl to assign you a ball to get started.'}
+                        </p>
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                         <div className="flex gap-4 p-5 bg-white/5 rounded-3xl border border-white/5">
                           <div className="w-10 h-10 rounded-xl bg-pink-500/20 flex items-center justify-center text-pink-500"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1" /></svg></div>
-                          <div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Weekly Entry</p><p className="text-white font-bold text-lg">£2.00</p></div>
+                          <div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Weekly Entry</p><p className="text-white font-bold text-lg">£2</p></div>
                         </div>
                         <div className="flex gap-4 p-5 bg-white/5 rounded-3xl border border-white/5">
                           <div className="w-10 h-10 rounded-xl bg-pink-500/20 flex items-center justify-center text-pink-500"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14" /></svg></div>
-                          <div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Draw Night</p><p className="text-white font-bold text-lg">Saturday</p></div>
+                          <div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Draw Night</p><p className="text-white font-bold text-lg">Saturday 8pm</p></div>
                         </div>
                       </div>
                     </div>
-                    <div className="bg-pink-500 border border-pink-400 rounded-[2.5rem] p-10 flex flex-col justify-between text-black">
-                      <div className="w-16 h-16 rounded-2xl bg-black/10 flex items-center justify-center mb-10"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636" /></svg></div>
-                      <div><p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-60">Total Raised</p><h4 className="text-5xl font-black tracking-tighter leading-none mb-2">£{totalCharityRaised}</h4><p className="text-xs font-bold leading-tight">Supporting bereaved parents across the UK.</p></div>
-                    </div>
-                  </div>
+                  )}
                 </div>
               )}
 
