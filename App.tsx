@@ -107,6 +107,7 @@ const App: React.FC = () => {
   const [seenOnboarding, setSeenOnboarding] = useState<boolean>(
     typeof window !== 'undefined' && localStorage.getItem('onboarding_v1_seen') === 'true'
   );
+  const [dangerOpen, setDangerOpen] = useState(false);
   const dismissNotice = () => {
     localStorage.setItem('notice_v1_dismissed', 'true');
     setNoticeDismissed(true);
@@ -311,6 +312,40 @@ const isAdmin = useMemo(() => {
     if (!upcomingDrawDateTime) return '';
     return upcomingDrawDateTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [upcomingDrawDateTime]);
+
+  // Balls that have an owner but aren't covered for the upcoming draw. Surfaces them at
+  // the top of admin so the admin can chase payment without scrolling the full grid.
+  const ballsDueThisWeek = useMemo(() => {
+    if (!upcomingDrawDateTime) return [];
+    return balls.filter((b) => {
+      if (!b?.owner) return false;
+      if (!b.paidUntil) return true;
+      const paid = new Date(b.paidUntil);
+      paid.setHours(20, 0, 0, 0);
+      return paid < upcomingDrawDateTime;
+    });
+  }, [balls, upcomingDrawDateTime]);
+
+  // Members enriched with how many balls they own and total weeks remaining.
+  const membersWithStats = useMemo(() => {
+    return (members as any[]).map((m) => {
+      const owned = balls.filter((b) => b?.email && b.email.toLowerCase() === (m.email ?? '').toLowerCase());
+      const totalWeeks = owned.reduce((sum, b) => sum + weeksCoveredFor(b), 0);
+      return { ...m, ballNumbers: owned.map((b) => b.number), totalWeeks };
+    });
+  }, [members, balls, upcomingDrawDateTime]);
+
+  const removeMember = async (memberId: string, memberName: string) => {
+    if (!isAdmin) return;
+    if (!confirm(`Remove ${memberName}? This unlinks them from the app — any balls they own keep the owner name but lose the registered-user link.`)) return;
+    const { error } = await supabase.from("members").delete().eq("id", memberId);
+    if (error) {
+      showToast("error", "Failed to remove member.");
+      return;
+    }
+    setMembers((prev: any[]) => prev.filter((m) => m.id !== memberId));
+    showToast("success", `${memberName} removed.`);
+  };
 
   const myBalls = useMemo(() => {
     if (!sessionEmail) return [];
@@ -1164,7 +1199,11 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       }
     }
 
-    sendPush("Payment Logged", `Received payment for Ball #${num} (${weeks} week${weeks > 1 ? 's' : ''})`, "admin", "reminder");
+    const ballsLabel = affectedNumbers.map((n) => `#${n}`).join(', ');
+    const newPaidThrough = updatedBalls.find((b) => b.number === affectedNumbers[0])?.paidUntil;
+    const throughLabel = newPaidThrough ? ` through ${formatPaidUntil(newPaidThrough)}` : '';
+    showToast("success", `Ball${affectedNumbers.length > 1 ? 's' : ''} ${ballsLabel} paid${throughLabel} (£${paymentAmount}).`);
+    sendPush("Payment Logged", `Ball${affectedNumbers.length > 1 ? 's' : ''} ${ballsLabel} paid${throughLabel}`, "admin", "reminder");
     setAdminAction(null);
     setPaymentWeeks('1');
     setApplyToAllOwner(false);
@@ -1514,6 +1553,41 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
               {activeTab === 'admin' && isAdmin && (
                 <div className="animate-in fade-in slide-in-from-bottom-8 duration-500 space-y-12">
+                  {/* DUE THIS WEEK — at the top so the admin sees it first */}
+                  {ballsDueThisWeek.length > 0 && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-[2.5rem] p-6 md:p-10 shadow-2xl">
+                      <div className="flex items-center justify-between mb-6">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-400 mb-1">Action needed</p>
+                          <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter">
+                            {ballsDueThisWeek.length} ball{ballsDueThisWeek.length === 1 ? '' : 's'} not covered for next draw
+                          </h4>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {ballsDueThisWeek.map((b) => (
+                          <div key={b.number} className="flex items-center justify-between bg-black/30 border border-white/5 rounded-2xl p-3 sm:p-4">
+                            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                              <LotteryBall number={b.number} className="w-10 h-10 flex-shrink-0" opacity={0.5} />
+                              <div className="min-w-0">
+                                <p className="text-sm font-black text-white truncate">{b.owner}</p>
+                                <p className="text-[10px] font-bold uppercase text-white/40 truncate">
+                                  {b.paidUntil ? `Expired ${formatPaidUntil(b.paidUntil)}` : 'Never paid'}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleUpdatePaymentInitiate(b.number)}
+                              className="ml-2 px-3 sm:px-4 py-2 bg-pink-500 text-black font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-xl hover:bg-pink-400 flex-shrink-0"
+                            >
+                              Mark Paid
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-2 space-y-8">
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
@@ -1770,23 +1844,39 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Bank</h4>
                         <p className="text-sm font-black text-white/80">Balance: £{bankBalance}</p>
                       </div>
-                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
-                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6 text-left">Hard Reset</h4>
-                        <p className="text-sm text-red-400 font-black uppercase mb-3">This cannot be undone</p>
-                        <input
-                          type="password"
-                          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white mb-3"
-                          placeholder="Enter PIN"
-                          value={resetPin}
-                          onChange={(e) => setResetPin(e.target.value)}
-                        />
+                      {/* DANGER ZONE — collapsed by default */}
+                      <div className="bg-red-500/5 border border-red-500/20 rounded-[2.5rem] p-6 md:p-8 shadow-2xl">
                         <button
-                          disabled={isResetting}
-                          onClick={handleHardReset}
-                          className="w-full py-3 bg-red-600 text-white font-black uppercase text-xs tracking-widest rounded-xl disabled:opacity-50"
+                          onClick={() => setDangerOpen((v) => !v)}
+                          className="w-full flex items-center justify-between text-left"
                         >
-                          {isResetting ? 'Resetting...' : 'Hard Reset'}
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-red-400 mb-1">Danger Zone</p>
+                            <h4 className="text-lg font-black text-white uppercase tracking-tighter">Hard Reset</h4>
+                          </div>
+                          <span className="text-white/40">{dangerOpen ? '▾' : '▸'}</span>
                         </button>
+                        {dangerOpen && (
+                          <div className="mt-6 space-y-3">
+                            <p className="text-xs text-red-400 leading-relaxed">
+                              This permanently clears all balls, all winners, and resets the bank to £0. Past ledger entries remain. This <strong>cannot</strong> be undone.
+                            </p>
+                            <input
+                              type="password"
+                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white"
+                              placeholder="Enter PIN"
+                              value={resetPin}
+                              onChange={(e) => setResetPin(e.target.value)}
+                            />
+                            <button
+                              disabled={isResetting}
+                              onClick={handleHardReset}
+                              className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-black uppercase text-xs tracking-widest rounded-xl disabled:opacity-50"
+                            >
+                              {isResetting ? 'Resetting...' : 'Hard Reset'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
                         <div>
@@ -1826,8 +1916,38 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           ))}
                         </div>
                       </div>
+                      {/* MEMBERS */}
+                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-6 md:p-8 shadow-2xl">
+                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Members</h4>
+                        {membersWithStats.length === 0 ? (
+                          <p className="text-sm text-white/40">No registered members yet.</p>
+                        ) : (
+                          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+                            {membersWithStats.map((m: any) => (
+                              <div key={m.id} className="flex items-center justify-between gap-3 bg-black/30 border border-white/5 rounded-2xl p-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-black text-white truncate">{m.full_name || '—'}</p>
+                                  <p className="text-[10px] uppercase font-bold text-white/40 truncate">{m.email}</p>
+                                  <p className="text-[10px] font-bold text-pink-400 mt-1">
+                                    {m.ballNumbers.length === 0
+                                      ? 'No balls'
+                                      : `${m.ballNumbers.length} ball${m.ballNumbers.length === 1 ? '' : 's'} · ${m.totalWeeks} week${m.totalWeeks === 1 ? '' : 's'} covered`}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => removeMember(m.id, m.full_name || m.email)}
+                                  className="text-[10px] font-black uppercase text-red-400 hover:text-red-300 px-2 py-1"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
                       <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-[2.5rem] p-10 text-black shadow-2xl">
-                         <div className="flex justify-between items-start mb-10"><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60">Revenue</p><h4 className="text-4xl font-black tracking-tighter leading-none">{paidCount > 0 ? 'Active' : 'Growth'}</h4></div><div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></div></div>
+                         <div className="flex justify-between items-start mb-10"><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60">Status</p><h4 className="text-4xl font-black tracking-tighter leading-none">{paidCount > 0 ? 'Active' : 'Growth'}</h4></div><div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></div></div>
                          <div className="space-y-4">
                           <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Paid Members</span><span>{paidCount}/59</span></div>
                           <div className="flex justify-between text-xs font-bold"><span>Prize Pot</span><span>£{currentPot}</span></div>
