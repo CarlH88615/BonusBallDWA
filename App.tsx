@@ -967,29 +967,24 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       ? balls.filter(b => b.owner === targetOwner).map(b => b.number)
       : [num];
 
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
     const updatedBalls = balls.map(ball => {
       if (!affectedNumbers.includes(ball.number)) return ball;
-
       if (!upcomingDrawDateTime) return ball;
 
       const existingPaidUntil = ball.paidUntil ? new Date(ball.paidUntil) : null;
+      const alreadyCovered = existingPaidUntil && existingPaidUntil >= upcomingDrawDateTime;
 
-      // Base date is:
-      // - upcoming draw if not currently covered
-      // - otherwise existing paidUntil (to extend forward)
-      const baseDate =
-        existingPaidUntil && existingPaidUntil >= upcomingDrawDateTime
-          ? existingPaidUntil
-          : upcomingDrawDateTime;
-
-      // IMPORTANT: weeks - 1
-      const newPaidUntilDate = new Date(
-        baseDate.getTime() + (weeks - 1) * 7 * 24 * 60 * 60 * 1000
-      );
+      // If already covering the upcoming draw, the new payment adds full weeks on top of
+      // existing paidUntil. If not covered, the first week pays for the upcoming draw
+      // itself, so paidUntil = upcomingDraw + (weeks - 1).
+      const newPaidUntilDate = alreadyCovered
+        ? new Date(existingPaidUntil!.getTime() + weeks * weekMs)
+        : new Date(upcomingDrawDateTime.getTime() + (weeks - 1) * weekMs);
 
       return {
         ...ball,
-        paidUntil: newPaidUntilDate.toISOString(), // STORE ISO NOT LOCALE
+        paidUntil: newPaidUntilDate.toISOString(),
       };
     });
 
