@@ -313,6 +313,17 @@ const isAdmin = useMemo(() => {
     return upcomingDrawDateTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [upcomingDrawDateTime]);
 
+  // Returns number of draws this ball is paid through, counting the upcoming draw as 1.
+  // Declared before any useMemo that calls it so we don't trip the TDZ on first render.
+  const weeksCoveredFor = (ball: any): number => {
+    if (!ball?.paidUntil || !upcomingDrawDateTime) return 0;
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const paid = new Date(ball.paidUntil);
+    paid.setHours(20, 0, 0, 0);
+    if (paid < upcomingDrawDateTime) return 0;
+    return Math.floor((paid.getTime() - upcomingDrawDateTime.getTime()) / weekMs) + 1;
+  };
+
   // Consecutive most-recent draws with no paid winner. Drives the rollover-streak banner.
   const rolloverStreak = useMemo(() => {
     let streak = 0;
@@ -362,16 +373,6 @@ const isAdmin = useMemo(() => {
     const me = sessionEmail.toLowerCase();
     return balls.filter((b) => b?.email && b.email.toLowerCase() === me);
   }, [balls, sessionEmail]);
-
-  // Returns number of draws this ball is paid through, counting the upcoming draw as 1.
-  const weeksCoveredFor = (ball: any): number => {
-    if (!ball?.paidUntil || !upcomingDrawDateTime) return 0;
-    const weekMs = 7 * 24 * 60 * 60 * 1000;
-    const paid = new Date(ball.paidUntil);
-    paid.setHours(20, 0, 0, 0);
-    if (paid < upcomingDrawDateTime) return 0;
-    return Math.floor((paid.getTime() - upcomingDrawDateTime.getTime()) / weekMs) + 1;
-  };
 
   const paidCount = useMemo(() => {
     if (!upcomingDrawDateTime) return 0;
