@@ -151,26 +151,55 @@ const App: React.FC = () => {
   const [winnerRows, setWinnerRows] = useState<any[]>([]);
   const [drawDate, setDrawDate] = useState<string | null>(null);
   const [bankBalance, setBankBalance] = useState<number>(0);
-  const fetchBankBalance = () => {
-    console.log("🔥 FETCHING bonus_ball_bank");
-    supabase
+  const fetchBankBalance = async (): Promise<number> => {
+    const { data, error } = await supabase
       .from("bonus_ball_bank")
       .select("balance")
-      .single()
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("❌ Failed to load bank", error);
-          return;
-        }
-        console.log("✅ bonus_ball_bank fetched", data);
-        setBankBalance(data?.balance ?? 0);
-      });
+      .single();
+    if (error) {
+      console.error("❌ Failed to load bank", error);
+      return bankBalance;
+    }
+    const next = (data as any)?.balance ?? 0;
+    setBankBalance(next);
+    return next;
+  };
+  // Race-safe bank delta: refetch latest balance from DB, then write balance + delta.
+  const adjustBank = async (delta: number): Promise<number | null> => {
+    const current = await fetchBankBalance();
+    const newBalance = current + delta;
+    const { error } = await supabase
+      .from("bonus_ball_bank")
+      .update({ balance: newBalance })
+      .eq("id", 1);
+    if (error) {
+      console.error("❌ adjustBank failed", error);
+      return null;
+    }
+    setBankBalance(newBalance);
+    return newBalance;
+  };
+  // Maps a ledger row's effect on the bank balance. Adjustment amounts are signed; the
+  // other types are stored as positive magnitudes with implied sign.
+  const ledgerEffectOnBank = (type: string, amount: number | string): number => {
+    const a = Number(amount) || 0;
+    switch (type) {
+      case "deposit": return +a;
+      case "paid_win": return -a;
+      case "charity": return -a;
+      case "adjustment": return +a;
+      default: return 0;
+    }
   };
   // helper removed: single-row model updates state.balls directly
   const [resetPin, setResetPin] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
-  const [ledgerRows, setLedgerRows] = useState([]);
+  const [ledgerRows, setLedgerRows] = useState<any[]>([]);
+  const [newEntryType, setNewEntryType] = useState<"deposit" | "paid_win" | "charity" | "adjustment">("deposit");
+  const [newEntryAmount, setNewEntryAmount] = useState<string>("");
+  const [newEntryNotes, setNewEntryNotes] = useState<string>("");
+  const [ledgerBusy, setLedgerBusy] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<"push" | "inapp">("push");
   const [scheduleMode, setScheduleMode] = useState<"now" | "once" | "recurring">("now");
   const [scheduleOnceDate, setScheduleOnceDate] = useState<string>('');
@@ -211,6 +240,72 @@ const isAdmin = useMemo(() => {
     );
   };
 
+  const reloadLedger = async () => {
+    const { data, error } = await supabase
+      .from("bonus_ball_ledger")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("❌ Failed to reload ledger", error);
+      return;
+    }
+    setLedgerRows(data ?? []);
+  };
+
+  const addManualEntry = async () => {
+    if (!isAdmin) return;
+    const raw = parseFloat(newEntryAmount);
+    if (isNaN(raw) || raw === 0) {
+      alert("Enter a non-zero amount.");
+      return;
+    }
+    // Adjustments accept signed input; other types accept positive magnitudes only.
+    const amount = newEntryType === "adjustment" ? raw : Math.abs(raw);
+    setLedgerBusy(true);
+    try {
+      const { error: insertErr } = await supabase
+        .from("bonus_ball_ledger")
+        .insert([{
+          type: newEntryType,
+          amount,
+          reference: "Manual entry",
+          notes: newEntryNotes || null,
+        }]);
+      if (insertErr) {
+        console.error("❌ Insert manual entry failed", insertErr);
+        alert("Failed to save entry.");
+        return;
+      }
+      await adjustBank(ledgerEffectOnBank(newEntryType, amount));
+      await reloadLedger();
+      setNewEntryAmount("");
+      setNewEntryNotes("");
+    } finally {
+      setLedgerBusy(false);
+    }
+  };
+
+  const deleteLedgerEntry = async (row: any) => {
+    if (!isAdmin) return;
+    if (!confirm(`Delete this ${row.type} entry for £${row.amount}? Bank will be adjusted to reverse it.`)) return;
+    setLedgerBusy(true);
+    try {
+      const { error: delErr } = await supabase
+        .from("bonus_ball_ledger")
+        .delete()
+        .eq("id", row.id);
+      if (delErr) {
+        console.error("❌ Delete ledger entry failed", delErr);
+        alert("Failed to delete.");
+        return;
+      }
+      await adjustBank(-ledgerEffectOnBank(row.type, row.amount));
+      await reloadLedger();
+    } finally {
+      setLedgerBusy(false);
+    }
+  };
+
   const upcomingDrawDateTime = useMemo(() => {
     if (!drawDate) return null;
     const [y, m, d] = drawDate.split('-').map(Number);
@@ -233,6 +328,39 @@ const isAdmin = useMemo(() => {
     if (!upcomingDrawDateTime) return '';
     return upcomingDrawDateTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [upcomingDrawDateTime]);
+
+  // Sum of every ball's prepaid weeks × £2 (only counting weeks at or beyond the upcoming draw).
+  // This is the truth-source for what should be in the bank from member contributions.
+  const expectedFromBalls = useMemo(() => {
+    if (!upcomingDrawDateTime) return 0;
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    return balls.reduce((sum, ball) => {
+      if (!ball?.paidUntil) return sum;
+      const paidUntil = new Date(ball.paidUntil);
+      paidUntil.setHours(20, 0, 0, 0);
+      if (paidUntil < upcomingDrawDateTime) return sum;
+      const weeks = Math.floor((paidUntil.getTime() - upcomingDrawDateTime.getTime()) / weekMs) + 1;
+      return sum + weeks * 2;
+    }, 0);
+  }, [balls, upcomingDrawDateTime]);
+
+  const expectedBankTotal = expectedFromBalls + (Number(totalRollover) || 0);
+
+  const ledgerNet = useMemo(
+    () => ledgerRows.reduce((sum, row) => sum + ledgerEffectOnBank(row.type, row.amount), 0),
+    [ledgerRows]
+  );
+
+  // Ledger sorted newest-first for display, with a running balance ("balance after this entry").
+  const ledgerWithRunning = useMemo(() => {
+    const oldestFirst = [...ledgerRows].reverse();
+    let running = 0;
+    const enriched = oldestFirst.map((row) => {
+      running += ledgerEffectOnBank(row.type, row.amount);
+      return { ...row, runningBalance: running };
+    });
+    return enriched.reverse();
+  }, [ledgerRows]);
 
   const formatPaidUntil = (iso?: string) => {
     if (!iso) return '';
@@ -324,14 +452,8 @@ const isAdmin = useMemo(() => {
       // Update bank only when a paid winner takes money out. Unpaid wins roll 100% forward, so no bank/ledger movement.
       if (isPaidWinner) {
         const bankDelta = -(paidPot + totalRollover);
-        const { error: bankErr } = await supabase
-          .from("bonus_ball_bank")
-          .update({ balance: (bankBalance ?? 0) + bankDelta })
-          .eq("id", 1);
-        if (bankErr) {
-          console.error("❌ Failed to update bank balance", bankErr);
-        } else {
-          fetchBankBalance();
+        const newBalance = await adjustBank(bankDelta);
+        if (newBalance !== null) {
           const { error: ledgerErr } = await supabase
             .from("bonus_ball_ledger")
             .insert([
@@ -344,8 +466,6 @@ const isAdmin = useMemo(() => {
             ]);
           if (ledgerErr) {
             console.error("❌ Failed to write ledger entry", ledgerErr);
-          } else {
-            console.log("📒 Ledger entry recorded");
           }
         }
       }
@@ -1003,15 +1123,9 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     setBalls(updatedBalls);
     console.log("✅ Payment persisted");
     const paymentAmount = weeks * 2 * affectedNumbers.length;
-    const { error: bankErr } = await supabase
-      .from("bonus_ball_bank")
-      .update({ balance: (bankBalance ?? 0) + paymentAmount })
-      .eq("id", 1);
-    if (bankErr) {
-      console.error("❌ Failed to update bank balance", bankErr);
-    } else {
-      fetchBankBalance();
-      await supabase
+    const newBalance = await adjustBank(paymentAmount);
+    if (newBalance !== null) {
+      const { error: ledgerErr } = await supabase
         .from("bonus_ball_ledger")
         .insert([
           {
@@ -1020,14 +1134,10 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             reference: "Ball payment",
             notes: `Payment for ${affectedNumbers.length} ball(s), ${weeks} week(s)`,
           },
-        ])
-        .then(({ error: ledgerErr }) => {
-          if (ledgerErr) {
-            console.error("❌ Failed to write ledger entry (deposit)", ledgerErr);
-          } else {
-            console.log("📒 Deposit recorded in ledger");
-          }
-        });
+        ]);
+      if (ledgerErr) {
+        console.error("❌ Failed to write ledger entry (deposit)", ledgerErr);
+      }
     }
 
     sendPush("Payment Logged", `Received payment for Ball #${num} (${weeks} week${weeks > 1 ? 's' : ''})`, "admin", "reminder");
@@ -1702,9 +1812,9 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
           </nav>
 
           {showLedger && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="bg-neutral-900 rounded-2xl w-[90%] max-w-3xl max-h-[80vh] flex flex-col">
-                
+            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+
                 <div className="flex justify-between items-center p-4 border-b border-neutral-800">
                   <h2 className="text-lg font-semibold">Ledger</h2>
                   <button
@@ -1715,32 +1825,138 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   </button>
                 </div>
 
-                <div className="p-4 overflow-y-auto">
-                  {ledgerRows.length === 0 ? (
+                <div className="p-4 overflow-y-auto space-y-6">
+                  {/* AUDIT PANEL */}
+                  {(() => {
+                    const driftBalls = bankBalance - expectedBankTotal;
+                    const driftLedger = bankBalance - ledgerNet;
+                    const driftClass = (n: number) =>
+                      Math.abs(n) < 0.01 ? "text-green-400" : "text-red-400";
+                    return (
+                      <div className="bg-neutral-800/60 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <p className="text-neutral-400 text-xs uppercase tracking-wider">Bank balance</p>
+                          <p className="text-2xl font-bold">£{Number(bankBalance).toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <p className="text-neutral-400 text-xs uppercase tracking-wider">Expected (prepaid + rollover)</p>
+                          <p className="text-2xl font-bold">£{Number(expectedBankTotal).toFixed(2)}</p>
+                          <p className={`text-xs ${driftClass(driftBalls)}`}>
+                            Δ £{driftBalls.toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-neutral-400 text-xs uppercase tracking-wider">Ledger net</p>
+                          <p className="text-2xl font-bold">£{Number(ledgerNet).toFixed(2)}</p>
+                          <p className={`text-xs ${driftClass(driftLedger)}`}>
+                            Δ £{driftLedger.toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-neutral-400 text-xs uppercase tracking-wider">Open rollover</p>
+                          <p className="text-2xl font-bold">£{Number(totalRollover).toFixed(2)}</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ADD MANUAL ENTRY */}
+                  {isAdmin && (
+                    <div className="bg-neutral-800/40 rounded-xl p-4">
+                      <p className="text-sm font-semibold mb-3">Add entry</p>
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                        <select
+                          className="md:col-span-3 bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm"
+                          value={newEntryType}
+                          onChange={(e) => setNewEntryType(e.target.value as any)}
+                        >
+                          <option value="deposit">Deposit</option>
+                          <option value="paid_win">Paid win (out)</option>
+                          <option value="charity">Charity (out)</option>
+                          <option value="adjustment">Adjustment (signed)</option>
+                        </select>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="Amount"
+                          className="md:col-span-2 bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm"
+                          value={newEntryAmount}
+                          onChange={(e) => setNewEntryAmount(e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Notes (optional)"
+                          className="md:col-span-5 bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm"
+                          value={newEntryNotes}
+                          onChange={(e) => setNewEntryNotes(e.target.value)}
+                        />
+                        <button
+                          disabled={ledgerBusy}
+                          onClick={addManualEntry}
+                          className="md:col-span-2 bg-pink-500 hover:bg-pink-600 disabled:opacity-50 text-black font-semibold rounded px-3 py-2 text-sm"
+                        >
+                          Add
+                        </button>
+                      </div>
+                      <p className="text-xs text-neutral-500 mt-2">
+                        Adjustments accept negative amounts. All other types are stored as positive — the type determines the sign on the bank.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* TABLE */}
+                  {ledgerWithRunning.length === 0 ? (
                     <p className="text-neutral-400">No ledger entries found.</p>
                   ) : (
-                    <table className="w-full text-sm">
-                      <thead className="text-neutral-400 border-b border-neutral-800">
-                        <tr>
-                          <th className="text-left py-2">Date</th>
-                          <th className="text-left py-2">Type</th>
-                          <th className="text-left py-2">Amount</th>
-                          <th className="text-left py-2">Reference</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ledgerRows.map((row) => (
-                          <tr key={row.id} className="border-b border-neutral-800">
-                            <td className="py-2">
-                              {new Date(row.created_at).toLocaleString()}
-                            </td>
-                            <td className="py-2">{row.type}</td>
-                            <td className="py-2">£{row.amount}</td>
-                            <td className="py-2">{row.reference}</td>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="text-neutral-400 border-b border-neutral-800">
+                          <tr>
+                            <th className="text-left py-2 pr-3">Date</th>
+                            <th className="text-left py-2 pr-3">Type</th>
+                            <th className="text-right py-2 pr-3">Amount</th>
+                            <th className="text-right py-2 pr-3">Running</th>
+                            <th className="text-left py-2 pr-3">Reference</th>
+                            <th className="text-left py-2 pr-3">Notes</th>
+                            {isAdmin && <th className="py-2"></th>}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {ledgerWithRunning.map((row) => {
+                            const effect = ledgerEffectOnBank(row.type, row.amount);
+                            const sign = effect > 0 ? "+" : effect < 0 ? "−" : "";
+                            const amtClass = effect > 0 ? "text-green-400" : effect < 0 ? "text-red-400" : "text-neutral-300";
+                            return (
+                              <tr key={row.id} className="border-b border-neutral-800/60 hover:bg-neutral-800/30">
+                                <td className="py-2 pr-3 whitespace-nowrap text-neutral-300">
+                                  {new Date(row.created_at).toLocaleString()}
+                                </td>
+                                <td className="py-2 pr-3 whitespace-nowrap">{row.type}</td>
+                                <td className={`py-2 pr-3 text-right whitespace-nowrap font-mono ${amtClass}`}>
+                                  {sign}£{Math.abs(Number(row.amount)).toFixed(2)}
+                                </td>
+                                <td className="py-2 pr-3 text-right whitespace-nowrap font-mono text-neutral-400">
+                                  £{Number(row.runningBalance).toFixed(2)}
+                                </td>
+                                <td className="py-2 pr-3 whitespace-nowrap text-neutral-300">{row.reference}</td>
+                                <td className="py-2 pr-3 text-neutral-400">{row.notes ?? ""}</td>
+                                {isAdmin && (
+                                  <td className="py-2 text-right">
+                                    <button
+                                      disabled={ledgerBusy}
+                                      onClick={() => deleteLedgerEntry(row)}
+                                      className="text-red-400 hover:text-red-300 disabled:opacity-40 text-xs"
+                                    >
+                                      Delete
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </div>
 
