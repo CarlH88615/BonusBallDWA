@@ -88,17 +88,18 @@ const App: React.FC = () => {
   const [resultBallNum, setResultBallNum] = useState('');
   const [paymentWeeks, setPaymentWeeks] = useState('1');
   
-  const [revealStep, setRevealStep] = useState<'searching' | 'tracking' | 'homing' | 'settled' | 'idle'>('idle');
-  const [revealBalls, setRevealBalls] = useState<BallState[]>([]);
-  const [spotlightPos, setSpotlightPos] = useState({ x: 0, y: 0 });
-
-  const revealRef = useRef<BallState[]>([]);
-  const spotlightRef = useRef({ x: 0, y: 0 });
+  type RevealStyle = 'slot' | 'bingo' | 'wheel' | 'tile' | 'curtain';
+  const [revealStyle, setRevealStyle] = useState<RevealStyle>('slot');
+  const [revealStep, setRevealStep] = useState<'idle' | 'running' | 'settled'>('idle');
+  // Per-style state. Each style only reads what it needs.
+  const [slotNumber, setSlotNumber] = useState<number>(1);
+  const [bingoGrid, setBingoGrid] = useState<Array<{ num: number; eliminated: boolean }>>([]);
+  const [tileGrid, setTileGrid] = useState<Array<{ num: number; flipped: boolean; display: number }>>([]);
+  const [curtainPhase, setCurtainPhase] = useState<'closed' | 'shake' | 'opening' | 'open'>('closed');
   const revealRequestRef = useRef<number>(null);
-  // Refs to the rendered ball elements + spotlight so the animation loop can write
-  // transforms directly without re-rendering React on every frame.
-  const ballElRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const spotlightElRef = useRef<HTMLDivElement | null>(null);
+  const revealTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Refs for direct DOM writes (wheel needs smooth 60fps rotation).
+  const wheelElRef = useRef<HTMLDivElement | null>(null);
 
   const [smallBalls, setSmallBalls] = useState<BallState[]>([]);
   const [selectedBallNum, setSelectedBallNum] = useState<number | null>(null);
@@ -710,203 +711,165 @@ const isAdmin = useMemo(() => {
     }
   }, [latestWin, hasSeenLatestReveal]);
 
-  type RevealStyle = 'cinematic' | 'vortex' | 'burst';
-  const startRevealSequence = (style: RevealStyle = 'cinematic') => {
-    if (!latestWin) return;
-    setShowWinReveal(true);
-    setRevealStep('searching');
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const ballRadius = w < 768 ? 38 : 60;
-    const cx = w / 2;
-    const cy = h * 0.5;
-    const colorStarters = [5, 15, 25, 35, 45, 55];
-    const winNum = latestWin!.ballNumber;
-    const initialBalls: BallState[] = colorStarters.map((num, i) => {
-      const isWinner = (num >= Math.floor(winNum / 10) * 10 && num < Math.ceil(winNum / 10) * 10) || (winNum < 10 && num < 10);
-      if (style === 'vortex') {
-        // Place evenly around a ring, tangential velocity for orbital motion
-        const a = (i / colorStarters.length) * Math.PI * 2;
-        const r = Math.min(w, h) * 0.32;
-        return {
-          id: i, num: isWinner ? winNum : num,
-          x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r,
-          vx: -Math.sin(a) * 8, vy: Math.cos(a) * 8,
-          radius: ballRadius, isWinner,
-        };
-      }
-      if (style === 'burst') {
-        // Stacked at centre, velocities radiating outward
-        const a = (i / colorStarters.length) * Math.PI * 2 + Math.random() * 0.4;
-        const speed = 22 + Math.random() * 8;
-        return {
-          id: i, num: isWinner ? winNum : num,
-          x: cx, y: cy,
-          vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
-          radius: ballRadius, isWinner,
-        };
-      }
-      // cinematic — original chaotic bounce
-      const a = Math.random() * Math.PI * 2;
-      const speed = 4 + Math.random() * 4;
-      return {
-        id: i, num: isWinner ? winNum : num,
-        x: Math.random() * (w - 200) + 100,
-        y: Math.random() * (h - 200) + 100,
-        vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
-        radius: ballRadius, isWinner,
-      };
-    });
-    revealRef.current = initialBalls;
-    spotlightRef.current = { x: w / 2, y: h / 2 };
-    setRevealBalls(initialBalls); // single render to mount DOM nodes; loop updates via refs
+  // Shared teardown: cancel everything previously scheduled by any reveal style.
+  const cancelRevealAnimations = () => {
+    if (revealRequestRef.current != null) {
+      cancelAnimationFrame(revealRequestRef.current);
+      revealRequestRef.current = null;
+    }
+    revealTimeoutsRef.current.forEach((t) => clearTimeout(t));
+    revealTimeoutsRef.current = [];
+  };
 
-    const SEARCH_MS = 1800;
-    const TRACK_MS = 1500;
-    const SUSPENSE_MS = 1300;
-    const SEARCH_END = SEARCH_MS;
-    const TRACK_END = SEARCH_END + TRACK_MS;
-    const SUSPENSE_END = TRACK_END + SUSPENSE_MS;
-
-    let phase: 'searching' | 'tracking' | 'suspense' | 'homing' = 'searching';
-    const sequenceStartTime = performance.now();
-    let searchTargetChangeTime = 0;
-    let currentSearchTarget = { x: w / 2, y: h / 2 };
-    const targetXCenter = w / 2;
-    const targetYCenter = h * 0.42;
-    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
-
-    const writeTransforms = () => {
-      const balls = revealRef.current;
-      for (let i = 0; i < balls.length; i++) {
-        const el = ballElRefs.current[i];
-        if (!el) continue;
-        const b = balls[i];
-        const isWinnerNow = b.isWinner;
-        const fadeOthers = phase === 'suspense' || phase === 'homing';
-        const isSettled = phase === 'homing' && Math.abs(b.x - targetXCenter) < 1 && Math.abs(b.y - targetYCenter) < 1;
-        const scale = isWinnerNow && phase === 'homing' ? (isSettled ? 2.5 : 1.4) : isWinnerNow && phase === 'suspense' ? 1.15 : 1;
-        const opacity = !isWinnerNow && fadeOthers ? (phase === 'homing' ? 0 : 0.25) : 1;
-        el.style.transform = `translate3d(${b.x - b.radius}px, ${b.y - b.radius}px, 0) scale(${scale})`;
-        el.style.opacity = String(opacity);
+  const startSlotReveal = (winNum: number) => {
+    const total = 6500; // ms
+    const start = performance.now();
+    const tick = () => {
+      const elapsed = performance.now() - start;
+      if (elapsed >= total) {
+        setSlotNumber(winNum);
+        setRevealStep('settled');
+        revealRequestRef.current = null;
+        return;
       }
-      const spotEl = spotlightElRef.current;
-      if (spotEl) {
-        const s = spotlightRef.current;
-        spotEl.style.background = `radial-gradient(circle 280px at ${s.x}px ${s.y}px, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.1) 40%, transparent 100%)`;
+      // Interval grows as we approach the end — fast at first, slow at the end
+      const progress = elapsed / total;
+      const intervalMs = 50 + Math.pow(progress, 3) * 700; // 50ms → 750ms
+      // Last 600ms: lock to a sequence approaching the winner
+      if (total - elapsed < 600) {
+        const candidates = [winNum, winNum, ((winNum + 17) % 59) + 1, winNum];
+        setSlotNumber(candidates[Math.floor(elapsed / 150) % candidates.length]);
+      } else {
+        setSlotNumber(Math.floor(Math.random() * 59) + 1);
       }
+      const t = setTimeout(tick, intervalMs);
+      revealTimeoutsRef.current.push(t);
     };
+    tick();
+  };
 
+  const startBingoReveal = (winNum: number) => {
+    // Build the 59-ball grid in numerical order
+    const grid = Array.from({ length: 59 }, (_, i) => ({ num: i + 1, eliminated: false }));
+    setBingoGrid(grid);
+    const order = grid
+      .map((b, i) => ({ i, num: b.num }))
+      .filter((b) => b.num !== winNum)
+      .sort(() => Math.random() - 0.5); // random elimination order
+
+    // Total ~5s. Start slow then accelerate then slow at the end.
+    let i = 0;
+    const eliminateOne = () => {
+      if (i >= order.length) {
+        setRevealStep('settled');
+        return;
+      }
+      const target = order[i];
+      setBingoGrid((prev) => prev.map((b, idx) => (idx === target.i ? { ...b, eliminated: true } : b)));
+      i++;
+      // Pacing: slower at start (suspense), fast in middle, slow at end (last few)
+      const remaining = order.length - i;
+      let delay: number;
+      if (i < 6) delay = 220 - i * 15;        // 220 → 135ms
+      else if (remaining < 6) delay = 280 + (6 - remaining) * 120; // dramatic final eliminations
+      else delay = 60;                          // fast middle
+      const t = setTimeout(eliminateOne, delay);
+      revealTimeoutsRef.current.push(t);
+    };
+    const first = setTimeout(eliminateOne, 600);
+    revealTimeoutsRef.current.push(first);
+  };
+
+  const startWheelReveal = (winNum: number) => {
+    // Each segment = 360/59 degrees. Pointer is at top (0deg). We want segment N's centre
+    // to land at -90deg (top). Total rotation = many spins + offset to winner.
+    const segDeg = 360 / 59;
+    const winnerCentre = (winNum - 1) * segDeg + segDeg / 2; // angle from origin of segment centre
+    const targetRotation = 360 * 7 - winnerCentre; // 7 spins then land
+    const duration = 6200;
+    const start = performance.now();
+    const easeOutQuart = (t: number) => 1 - Math.pow(1 - t, 4);
     const loop = (now: number) => {
-      const elapsed = now - sequenceStartTime;
-      const balls = revealRef.current;
-      const winningBall = balls.find((b) => b.isWinner)!;
-
-      // Style-specific physics
-      if (style === 'vortex') {
-        // Orbital pull toward centre; winner spirals inward, others keep orbiting
-        for (let i = 0; i < balls.length; i++) {
-          const b = balls[i];
-          const dx = cx - b.x;
-          const dy = cy - b.y;
-          const dist = Math.max(20, Math.sqrt(dx * dx + dy * dy));
-          // Tangential push to maintain orbit
-          const tx = -dy / dist;
-          const ty = dx / dist;
-          b.vx += tx * 0.3;
-          b.vy += ty * 0.3;
-          // Pull toward centre, stronger over time for the winner
-          const pullStrength = b.isWinner ? Math.min(0.04, elapsed / 100000) : 0.005;
-          b.vx += (dx / dist) * pullStrength * dist * 0.05;
-          b.vy += (dy / dist) * pullStrength * dist * 0.05;
-          // Speed cap + slight damping
-          const speed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-          const maxSpeed = b.isWinner ? 14 : 10;
-          if (speed > maxSpeed) { b.vx = (b.vx / speed) * maxSpeed; b.vy = (b.vy / speed) * maxSpeed; }
-          b.x += b.vx;
-          b.y += b.vy;
-        }
-      } else if (style === 'burst') {
-        // Outward velocity, then gravity pulls non-winners off-screen; winner decelerates and floats
-        const gravity = 0.55;
-        for (let i = 0; i < balls.length; i++) {
-          const b = balls[i];
-          if (b.isWinner && phase === 'homing') continue;
-          if (b.isWinner) {
-            // Decelerate and float toward target
-            b.vx *= 0.96;
-            b.vy *= 0.96;
-          } else {
-            b.vy += gravity;
-            b.vx *= 0.998;
-          }
-          b.x += b.vx;
-          b.y += b.vy;
-          // Walls: winner bounces softly; others don't (let them fall off)
-          if (b.isWinner) {
-            if (b.x < b.radius) { b.vx = Math.abs(b.vx) * 0.6; b.x = b.radius; }
-            else if (b.x > w - b.radius) { b.vx = -Math.abs(b.vx) * 0.6; b.x = w - b.radius; }
-            if (b.y < b.radius) { b.vy = Math.abs(b.vy) * 0.6; b.y = b.radius; }
-            else if (b.y > h - b.radius) { b.vy = -Math.abs(b.vy) * 0.6; b.y = h - b.radius; }
-          }
-        }
-      } else {
-        // cinematic: full-wall bounce, light damping during suspense
-        const damping = phase === 'suspense' ? 0.985 : 1;
-        for (let i = 0; i < balls.length; i++) {
-          const b = balls[i];
-          if (phase === 'homing' && b.isWinner) continue;
-          b.vx *= damping;
-          b.vy *= damping;
-          b.x += b.vx;
-          b.y += b.vy;
-          if (b.x < b.radius) { b.vx = Math.abs(b.vx); b.x = b.radius; }
-          else if (b.x > w - b.radius) { b.vx = -Math.abs(b.vx); b.x = w - b.radius; }
-          if (b.y < b.radius) { b.vy = Math.abs(b.vy); b.y = b.radius; }
-          else if (b.y > h - b.radius) { b.vy = -Math.abs(b.vy); b.y = h - b.radius; }
-        }
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / duration);
+      const angle = targetRotation * easeOutQuart(t);
+      if (wheelElRef.current) {
+        wheelElRef.current.style.transform = `rotate(${angle}deg)`;
       }
-
-      // Spotlight + phase logic
-      if (elapsed < SEARCH_END) {
-        if (now > searchTargetChangeTime) {
-          currentSearchTarget = { x: 100 + Math.random() * (w - 200), y: 100 + Math.random() * (h - 200) };
-          searchTargetChangeTime = now + 450;
-        }
-        spotlightRef.current.x += (currentSearchTarget.x - spotlightRef.current.x) * 0.10;
-        spotlightRef.current.y += (currentSearchTarget.y - spotlightRef.current.y) * 0.10;
-      } else if (elapsed < TRACK_END) {
-        if (phase !== 'tracking') { phase = 'tracking'; setRevealStep('tracking'); }
-        spotlightRef.current.x += (winningBall.x - spotlightRef.current.x) * 0.14;
-        spotlightRef.current.y += (winningBall.y - spotlightRef.current.y) * 0.14;
-      } else if (elapsed < SUSPENSE_END) {
-        if (phase !== 'suspense') { phase = 'suspense'; setRevealStep('homing'); /* reuse homing step for CSS */ }
-        spotlightRef.current.x += (winningBall.x - spotlightRef.current.x) * 0.2;
-        spotlightRef.current.y += (winningBall.y - spotlightRef.current.y) * 0.2;
+      if (t < 1) {
+        revealRequestRef.current = requestAnimationFrame(loop);
       } else {
-        if (phase !== 'homing') { phase = 'homing'; setRevealStep('homing'); }
-        const homingElapsed = elapsed - SUSPENSE_END;
-        const homingDuration = 1200;
-        const t = Math.min(1, homingElapsed / homingDuration);
-        const ease = easeOutCubic(t);
-        winningBall.x = winningBall.x + (targetXCenter - winningBall.x) * ease * 0.18;
-        winningBall.y = winningBall.y + (targetYCenter - winningBall.y) * ease * 0.18;
-        spotlightRef.current.x += (winningBall.x - spotlightRef.current.x) * 0.3;
-        spotlightRef.current.y += (winningBall.y - spotlightRef.current.y) * 0.3;
-        if (t >= 1 && Math.abs(winningBall.x - targetXCenter) < 1.5 && Math.abs(winningBall.y - targetYCenter) < 1.5) {
-          winningBall.x = targetXCenter;
-          winningBall.y = targetYCenter;
-          writeTransforms();
-          setRevealStep('settled');
-          cancelAnimationFrame(revealRequestRef.current!);
-          return;
-        }
+        revealRequestRef.current = null;
+        setRevealStep('settled');
       }
-
-      writeTransforms();
-      revealRequestRef.current = requestAnimationFrame(loop);
     };
     revealRequestRef.current = requestAnimationFrame(loop);
+  };
+
+  const startTileReveal = (winNum: number) => {
+    const grid = Array.from({ length: 59 }, (_, i) => ({
+      num: i + 1,
+      flipped: false,
+      display: Math.floor(Math.random() * 59) + 1,
+    }));
+    setTileGrid(grid);
+    // Sweep flip in a wave: diagonal order
+    const order = grid
+      .map((_, i) => i)
+      .sort((a, b) => {
+        const ax = a % 10, ay = Math.floor(a / 10);
+        const bx = b % 10, by = Math.floor(b / 10);
+        return (ax + ay) - (bx + by) || a - b;
+      });
+    // Make sure winner is LAST to flip
+    const winnerIdx = winNum - 1;
+    const noWinner = order.filter((i) => i !== winnerIdx);
+    const sequence = [...noWinner, winnerIdx];
+    let i = 0;
+    const flipNext = () => {
+      if (i >= sequence.length) {
+        setRevealStep('settled');
+        return;
+      }
+      const target = sequence[i];
+      setTileGrid((prev) => prev.map((tile, idx) => (idx === target ? { ...tile, flipped: true } : tile)));
+      i++;
+      // Accelerate then decelerate for the last 4
+      const remaining = sequence.length - i;
+      const delay = remaining < 4 ? 350 + (4 - remaining) * 200 : 45;
+      const t = setTimeout(flipNext, delay);
+      revealTimeoutsRef.current.push(t);
+    };
+    const first = setTimeout(flipNext, 400);
+    revealTimeoutsRef.current.push(first);
+  };
+
+  const startCurtainReveal = (_winNum: number) => {
+    setCurtainPhase('closed');
+    const t1 = setTimeout(() => setCurtainPhase('shake'), 200);
+    const t2 = setTimeout(() => setCurtainPhase('opening'), 2400);
+    const t3 = setTimeout(() => { setCurtainPhase('open'); setRevealStep('settled'); }, 4400);
+    revealTimeoutsRef.current.push(t1, t2, t3);
+  };
+
+  const startRevealSequence = (style: RevealStyle = 'slot') => {
+    if (!latestWin) return;
+    cancelRevealAnimations();
+    setRevealStyle(style);
+    setShowWinReveal(true);
+    setRevealStep('running');
+    setSlotNumber(1);
+    setBingoGrid([]);
+    setTileGrid([]);
+    setCurtainPhase('closed');
+    // Reset wheel rotation if it was previously animated
+    if (wheelElRef.current) wheelElRef.current.style.transform = 'rotate(0deg)';
+    const winNum = latestWin!.ballNumber;
+    if (style === 'slot') startSlotReveal(winNum);
+    else if (style === 'bingo') startBingoReveal(winNum);
+    else if (style === 'wheel') startWheelReveal(winNum);
+    else if (style === 'tile') startTileReveal(winNum);
+    else if (style === 'curtain') startCurtainReveal(winNum);
   };
 
 useEffect(() => {
@@ -1394,31 +1357,133 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       {/* WIN REVEAL */}
       {showWinReveal && (
         <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-black overflow-hidden">
-          <div ref={spotlightElRef} className={`absolute inset-0 pointer-events-none transition-opacity duration-1000 ${revealStep === 'settled' ? 'opacity-0' : 'opacity-100'}`} />
-          <div className="relative w-full h-full pointer-events-none">
-            {revealBalls.map((ball, idx) => (
-              <div
-                key={ball.id}
-                ref={(el) => { ballElRefs.current[idx] = el; }}
-                className={`absolute top-0 left-0 ${ball.isWinner && revealStep === 'settled' ? 'transition-transform duration-700 ease-out' : ''}`}
-                style={{ width: ball.radius * 2, height: ball.radius * 2, willChange: 'transform, opacity', zIndex: ball.isWinner ? 10 : 1 }}
-              >
-                <LotteryBall
-                  number={ball.num}
-                  hideShadow={true}
-                  showNumber={ball.isWinner && revealStep === 'settled'}
-                  className={`w-full h-full ${ball.isWinner && revealStep === 'settled' ? 'animate-pulse-win' : ''}`}
-                />
+
+          {/* SLOT MACHINE — single big number cycling */}
+          {revealStyle === 'slot' && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-8 animate-pulse">Drawing</p>
+                <div className={`mx-auto rounded-3xl border-4 ${revealStep === 'settled' ? 'border-yellow-400' : 'border-white/10'} bg-black/40 px-10 py-6 inline-block transition-all duration-500 ${revealStep === 'settled' ? 'scale-110 shadow-[0_0_120px_rgba(250,204,21,0.6)]' : ''}`}>
+                  <span className={`block font-black tracking-tighter ${revealStep === 'settled' ? 'text-yellow-400' : 'text-white'} text-[180px] md:text-[260px] leading-none drop-shadow-[0_0_40px_rgba(255,255,255,0.4)]`}>
+                    {String(slotNumber).padStart(2, '0')}
+                  </span>
+                </div>
               </div>
-            ))}
-            <div className={`absolute bottom-[12vh] left-0 w-full text-center transition-all duration-1000 delay-500 pointer-events-auto z-[50] ${revealStep === 'settled' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-20'}`}>
-               <p className="text-pink-500 font-black uppercase tracking-[0.5em] text-[10px] mb-6">Saturday Draw Revealed</p>
-               <h2 className="text-6xl md:text-8xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">{latestWin?.winner}</h2>
-               <p className="text-yellow-500 font-black text-4xl md:text-6xl tracking-tighter drop-shadow-xl">£{latestWin?.prizeAmount || latestWin?.charityAmount || 0}</p>
-               <div className="mt-14"><button onClick={() => setShowWinReveal(false)} className="px-14 py-5 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button></div>
+            </div>
+          )}
+
+          {/* BINGO ELIMINATION — 59 balls, eliminate one by one */}
+          {revealStyle === 'bingo' && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-10">
+              <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-6">Last Ball Standing</p>
+              <div className="grid grid-cols-10 gap-2 md:gap-3 max-w-4xl">
+                {bingoGrid.map((b) => (
+                  <div
+                    key={b.num}
+                    className={`relative aspect-square flex items-center justify-center transition-all duration-300 ${b.eliminated ? 'opacity-0 scale-50' : revealStep === 'settled' ? 'opacity-100 scale-150' : 'opacity-100 scale-100'}`}
+                  >
+                    <LotteryBall number={b.num} className="w-full h-full" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* WHEEL OF FORTUNE — spinning wheel with pointer */}
+          {revealStyle === 'wheel' && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="relative w-[90vmin] h-[90vmin] max-w-[800px] max-h-[800px]">
+                {/* pointer */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-2 w-0 h-0 border-l-[18px] border-r-[18px] border-t-[28px] border-l-transparent border-r-transparent border-t-yellow-400 z-20 drop-shadow-lg" />
+                {/* wheel */}
+                <div ref={wheelElRef} className="absolute inset-0 rounded-full border-4 border-white/10 shadow-[0_0_60px_rgba(236,72,153,0.3)]" style={{ background: 'conic-gradient(from -90deg, #ec4899, #f97316, #facc15, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899)' }}>
+                  {Array.from({ length: 59 }, (_, i) => {
+                    const angle = (i * 360) / 59;
+                    return (
+                      <div
+                        key={i}
+                        className="absolute left-1/2 top-1/2 origin-top -translate-x-1/2 text-white font-black text-[10px] md:text-xs"
+                        style={{ transform: `translate(-50%, 0) rotate(${angle}deg) translateY(8px)` }}
+                      >
+                        {i + 1}
+                      </div>
+                    );
+                  })}
+                  <div className="absolute inset-[36%] rounded-full bg-black flex items-center justify-center border-2 border-white/20">
+                    <span className="text-pink-500 font-black uppercase tracking-widest text-[10px]">Draw</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TILE FLIP — 59 face-down cards flip in sequence */}
+          {revealStyle === 'tile' && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-10">
+              <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-6">Turn Them Over</p>
+              <div className="grid grid-cols-10 gap-1.5 md:gap-2 max-w-3xl">
+                {tileGrid.map((tile) => {
+                  const isWinner = tile.num === latestWin?.ballNumber;
+                  const showFace = tile.flipped;
+                  return (
+                    <div key={tile.num} className="relative aspect-square" style={{ perspective: '600px' }}>
+                      <div
+                        className="absolute inset-0 transition-transform duration-500"
+                        style={{ transformStyle: 'preserve-3d', transform: showFace ? 'rotateY(180deg)' : 'rotateY(0)' }}
+                      >
+                        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/5 border border-white/10 text-white/40 font-black" style={{ backfaceVisibility: 'hidden' }}>?</div>
+                        <div
+                          className={`absolute inset-0 flex items-center justify-center rounded-lg font-black text-xs md:text-sm ${isWinner && showFace ? 'bg-yellow-400 text-black shadow-[0_0_30px_rgba(250,204,21,0.8)] scale-110' : 'bg-pink-500/20 border border-pink-500/40 text-white'}`}
+                          style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                        >
+                          {tile.num}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* STAGE CURTAINS — drape opens to reveal winner */}
+          {revealStyle === 'curtain' && (
+            <div className="absolute inset-0 overflow-hidden">
+              {/* The revealed ball behind the curtains */}
+              <div className={`absolute inset-0 flex items-center justify-center transition-opacity duration-700 ${curtainPhase === 'open' ? 'opacity-100' : 'opacity-0'}`}>
+                <LotteryBall number={latestWin?.ballNumber ?? 1} className="w-64 h-64 md:w-96 md:h-96 drop-shadow-[0_0_80px_rgba(250,204,21,0.6)]" />
+              </div>
+              {/* Left curtain */}
+              <div
+                className={`absolute top-0 bottom-0 left-0 w-1/2 bg-gradient-to-r from-red-900 to-red-700 shadow-[0_0_60px_rgba(0,0,0,0.6)] transition-transform ${curtainPhase === 'opening' || curtainPhase === 'open' ? 'duration-[2000ms] -translate-x-full' : curtainPhase === 'shake' ? 'animate-curtain-shake-l' : ''}`}
+              />
+              {/* Right curtain */}
+              <div
+                className={`absolute top-0 bottom-0 right-0 w-1/2 bg-gradient-to-l from-red-900 to-red-700 shadow-[0_0_60px_rgba(0,0,0,0.6)] transition-transform ${curtainPhase === 'opening' || curtainPhase === 'open' ? 'duration-[2000ms] translate-x-full' : curtainPhase === 'shake' ? 'animate-curtain-shake-r' : ''}`}
+              />
+              {/* Building-tension label while closed */}
+              {curtainPhase !== 'open' && (
+                <p className="absolute bottom-[15vh] left-0 w-full text-center text-yellow-400 font-black uppercase tracking-[0.5em] text-xs animate-pulse z-10">And the winner is…</p>
+              )}
+            </div>
+          )}
+
+          {/* SHARED WINNER NAMEPLATE — appears once settled */}
+          <div className={`absolute bottom-[8vh] left-0 w-full text-center transition-all duration-700 delay-300 pointer-events-auto z-[50] ${revealStep === 'settled' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+            <p className="text-pink-500 font-black uppercase tracking-[0.5em] text-[10px] mb-4">Saturday Draw Revealed</p>
+            <h2 className="text-4xl md:text-7xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">{latestWin?.winner}</h2>
+            <p className="text-yellow-400 font-black text-2xl md:text-5xl tracking-tighter drop-shadow-xl">£{latestWin?.prizeAmount || 0}</p>
+            <div className="mt-8">
+              <button onClick={() => { cancelRevealAnimations(); setShowWinReveal(false); }} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
             </div>
           </div>
-          <style dangerouslySetInnerHTML={{ __html: `@keyframes pulseWin { 0%, 100% { filter: drop-shadow(0 0 40px rgba(255,255,255,0.2)); transform: scale(2.5); } 50% { filter: drop-shadow(0 0 90px rgba(255,255,255,0.5)); transform: scale(2.6); } } .animate-pulse-win { animation: pulseWin 3s ease-in-out infinite; }`}} />
+
+          <style dangerouslySetInnerHTML={{ __html: `
+            @keyframes curtainShakeL { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 50% { transform: translateX(2px); } 75% { transform: translateX(-2px); } }
+            @keyframes curtainShakeR { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(3px); } 50% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+            .animate-curtain-shake-l { animation: curtainShakeL 0.15s ease-in-out infinite; }
+            .animate-curtain-shake-r { animation: curtainShakeR 0.15s ease-in-out infinite; }
+          ` }} />
         </div>
       )}
 
@@ -1859,27 +1924,26 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <p className="text-xs text-white/50 italic">No latest winner to preview — record a draw first.</p>
                         )}
                         {latestWin && (
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <button
-                              onClick={() => startRevealSequence('cinematic')}
-                              className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all"
-                            >
-                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Cinematic</span>
-                              <span className="text-[10px] text-white/50">Spotlight searches, winner glides in</span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                            <button onClick={() => startRevealSequence('slot')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
+                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Slot Machine</span>
+                              <span className="text-[10px] text-white/50">Huge number cycles fast, slows with a thunk</span>
                             </button>
-                            <button
-                              onClick={() => startRevealSequence('vortex')}
-                              className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all"
-                            >
-                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Vortex</span>
-                              <span className="text-[10px] text-white/50">Balls orbit, winner spirals to centre</span>
+                            <button onClick={() => startRevealSequence('bingo')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
+                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Bingo Eliminate</span>
+                              <span className="text-[10px] text-white/50">All 59 balls, eliminated until one remains</span>
                             </button>
-                            <button
-                              onClick={() => startRevealSequence('burst')}
-                              className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all"
-                            >
-                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Burst</span>
-                              <span className="text-[10px] text-white/50">Explode outward, others fall, winner floats</span>
+                            <button onClick={() => startRevealSequence('wheel')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
+                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Wheel</span>
+                              <span className="text-[10px] text-white/50">Big wheel spins, decelerates under a pointer</span>
+                            </button>
+                            <button onClick={() => startRevealSequence('tile')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
+                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Tile Flip</span>
+                              <span className="text-[10px] text-white/50">"?" tiles sweep-flip, winner glows last</span>
+                            </button>
+                            <button onClick={() => startRevealSequence('curtain')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
+                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Stage Curtain</span>
+                              <span className="text-[10px] text-white/50">Red curtains shake, then part dramatically</span>
                             </button>
                           </div>
                         )}
