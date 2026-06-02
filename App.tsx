@@ -94,6 +94,10 @@ const App: React.FC = () => {
   // Per-style state. Each style only reads what it needs.
   const [slotNumber, setSlotNumber] = useState<number>(1);
   const [bingoGrid, setBingoGrid] = useState<Array<{ num: number; eliminated: boolean }>>([]);
+  const [bingoFinale, setBingoFinale] = useState<{
+    phase: 'idle' | 'rally' | 'shake3' | 'elim1' | 'shake2' | 'elim2' | 'crown';
+    finalists: number[]; // [loser1, loser2, winner] order — eliminated in 0, 1
+  }>({ phase: 'idle', finalists: [] });
   const [tileGrid, setTileGrid] = useState<Array<{ num: number; flipped: boolean; display: number }>>([]);
   const [curtainPhase, setCurtainPhase] = useState<'closed' | 'shake' | 'opening' | 'open'>('closed');
   const revealRequestRef = useRef<number>(null);
@@ -752,30 +756,48 @@ const isAdmin = useMemo(() => {
     // Build the 59-ball grid in numerical order
     const grid = Array.from({ length: 59 }, (_, i) => ({ num: i + 1, eliminated: false }));
     setBingoGrid(grid);
-    const order = grid
-      .map((b, i) => ({ i, num: b.num }))
-      .filter((b) => b.num !== winNum)
-      .sort(() => Math.random() - 0.5); // random elimination order
+    setBingoFinale({ phase: 'idle', finalists: [] });
 
-    // Total ~5s. Start slow then accelerate then slow at the end.
+    // Pick 2 random non-winners to be the other finalists; eliminate everyone else first.
+    const nonWinnerNums = grid.map((b) => b.num).filter((n) => n !== winNum);
+    const shuffled = [...nonWinnerNums].sort(() => Math.random() - 0.5);
+    const otherFinalists = shuffled.slice(0, 2);
+    const toEliminateInGrid = shuffled.slice(2); // 56 balls
+
+    // Phase 1: fast grid eliminations until only the 3 finalists remain.
     let i = 0;
     const eliminateOne = () => {
-      if (i >= order.length) {
-        setRevealStep('settled');
+      if (i >= toEliminateInGrid.length) {
+        // Hold for a beat, then transition into finale rally
+        const t = setTimeout(() => beginFinale(), 350);
+        revealTimeoutsRef.current.push(t);
         return;
       }
-      const target = order[i];
-      setBingoGrid((prev) => prev.map((b, idx) => (idx === target.i ? { ...b, eliminated: true } : b)));
+      const targetNum = toEliminateInGrid[i];
+      setBingoGrid((prev) => prev.map((b) => (b.num === targetNum ? { ...b, eliminated: true } : b)));
       i++;
-      // Pacing: slower at start (suspense), fast in middle, slow at end (last few)
-      const remaining = order.length - i;
+      const remaining = toEliminateInGrid.length - i;
       let delay: number;
-      if (i < 6) delay = 220 - i * 15;        // 220 → 135ms
-      else if (remaining < 6) delay = 280 + (6 - remaining) * 120; // dramatic final eliminations
-      else delay = 60;                          // fast middle
+      if (i < 6) delay = 220 - i * 15;          // ease in
+      else if (remaining < 4) delay = 180 + (4 - remaining) * 90; // build tension as we approach finale
+      else delay = 50;                            // rip through the middle
       const t = setTimeout(eliminateOne, delay);
       revealTimeoutsRef.current.push(t);
     };
+
+    const beginFinale = () => {
+      // Finalists array: [loser1, loser2, winner] for clarity
+      const finalists = [otherFinalists[0], otherFinalists[1], winNum];
+      setBingoFinale({ phase: 'rally', finalists });
+      // After rally animation (~700ms), start the shake-and-eliminate sequence
+      const tShake = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'shake3' })), 800);
+      const tElim1 = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'elim1' })), 2200); // shake for 1.4s
+      const tShake2 = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'shake2' })), 3000);
+      const tElim2 = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'elim2' })), 4400); // another 1.4s
+      const tCrown = setTimeout(() => { setBingoFinale((s) => ({ ...s, phase: 'crown' })); setRevealStep('settled'); }, 5300);
+      revealTimeoutsRef.current.push(tShake, tElim1, tShake2, tElim2, tCrown);
+    };
+
     const first = setTimeout(eliminateOne, 600);
     revealTimeoutsRef.current.push(first);
   };
@@ -828,15 +850,25 @@ const isAdmin = useMemo(() => {
     let i = 0;
     const flipNext = () => {
       if (i >= sequence.length) {
-        setRevealStep('settled');
+        // Brief pause after the winner flips so the user can absorb it
+        const t = setTimeout(() => setRevealStep('settled'), 600);
+        revealTimeoutsRef.current.push(t);
         return;
       }
       const target = sequence[i];
       setTileGrid((prev) => prev.map((tile, idx) => (idx === target ? { ...tile, flipped: true } : tile)));
       i++;
-      // Accelerate then decelerate for the last 4
       const remaining = sequence.length - i;
-      const delay = remaining < 4 ? 350 + (4 - remaining) * 200 : 45;
+      // Dramatic deceleration on the final 6 flips
+      let delay: number;
+      if (remaining === 0) delay = 0;              // already done
+      else if (remaining === 1) delay = 1600;      // pause before final winner flip
+      else if (remaining === 2) delay = 1100;
+      else if (remaining === 3) delay = 800;
+      else if (remaining === 4) delay = 550;
+      else if (remaining === 5) delay = 350;
+      else if (remaining === 6) delay = 200;
+      else delay = 40;                              // fast rip through the middle
       const t = setTimeout(flipNext, delay);
       revealTimeoutsRef.current.push(t);
     };
@@ -860,6 +892,7 @@ const isAdmin = useMemo(() => {
     setRevealStep('running');
     setSlotNumber(1);
     setBingoGrid([]);
+    setBingoFinale({ phase: 'idle', finalists: [] });
     setTileGrid([]);
     setCurtainPhase('closed');
     // Reset wheel rotation if it was previously animated
@@ -1373,31 +1406,54 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             </div>
           )}
 
-          {/* BINGO ELIMINATION — 59 balls, eliminate one by one */}
+          {/* BINGO ELIMINATION — phase 1: grid burn-down; phase 2: 3-ball finale showdown */}
           {revealStyle === 'bingo' && (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-8">
-              <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-4 md:mb-6">Last Ball Standing</p>
-              <div className="grid grid-cols-8 gap-2 md:gap-3 w-full max-w-2xl px-2">
-                {bingoGrid.map((b) => {
-                  const isWinner = b.num === latestWin?.ballNumber;
-                  const settledWinner = revealStep === 'settled' && isWinner;
-                  return (
-                    <div
-                      key={b.num}
-                      className={`relative aspect-square flex items-center justify-center transition-all duration-500 ${
-                        b.eliminated
-                          ? 'opacity-0 scale-0 rotate-180'
-                          : settledWinner
-                          ? 'opacity-100 scale-[2] z-10 drop-shadow-[0_0_40px_rgba(250,204,21,0.8)]'
-                          : 'opacity-100 scale-100'
-                      }`}
-                      style={{ transitionTimingFunction: b.eliminated ? 'cubic-bezier(0.4, 0, 1, 1)' : 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
-                    >
-                      <LotteryBall number={b.num} showNumber={true} className="w-full h-full" />
-                    </div>
-                  );
-                })}
-              </div>
+              {bingoFinale.phase === 'idle' ? (
+                <>
+                  <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-4 md:mb-6">Burning the Field</p>
+                  <div className="grid grid-cols-8 gap-2 md:gap-3 w-full max-w-2xl px-2">
+                    {bingoGrid.map((b) => (
+                      <div
+                        key={b.num}
+                        className={`relative aspect-square flex items-center justify-center transition-all duration-500 ${
+                          b.eliminated ? 'opacity-0 scale-0 rotate-180' : 'opacity-100 scale-100'
+                        }`}
+                        style={{ transitionTimingFunction: b.eliminated ? 'cubic-bezier(0.4, 0, 1, 1)' : 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+                      >
+                        <LotteryBall number={b.num} showNumber={true} className="w-full h-full" />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-6 md:mb-10">Final Three</p>
+                  <div className="flex items-center justify-center gap-6 md:gap-14 transition-all duration-700">
+                    {bingoFinale.finalists.map((num, idx) => {
+                      const isWinner = num === latestWin?.ballNumber;
+                      const phase = bingoFinale.phase;
+                      // idx 0 = loser1, idx 1 = loser2, idx 2 = winner
+                      const explodedOut = (idx === 0 && (phase === 'elim1' || phase === 'shake2' || phase === 'elim2' || phase === 'crown'))
+                        || (idx === 1 && (phase === 'elim2' || phase === 'crown'));
+                      const shaking =
+                        (phase === 'shake3') ||
+                        (phase === 'shake2' && idx !== 0);
+                      const crowned = phase === 'crown' && isWinner;
+                      return (
+                        <div
+                          key={`${num}-${idx}`}
+                          className={`relative transition-all duration-700 ease-out ${
+                            explodedOut ? 'opacity-0 scale-0 rotate-[720deg]' : crowned ? 'scale-150 drop-shadow-[0_0_60px_rgba(250,204,21,0.9)]' : 'opacity-100 scale-100'
+                          } ${shaking ? 'animate-finalist-shake' : ''}`}
+                        >
+                          <LotteryBall number={num} showNumber={true} className="w-28 h-28 md:w-44 md:h-44" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1413,8 +1469,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     // Each ball positioned around the wheel edge. -90deg so first ball is at top.
                     const angleDeg = (i * 360) / 59 - 90;
                     const angleRad = (angleDeg * Math.PI) / 180;
-                    // Distance from centre as percentage of wheel radius
-                    const r = 42; // %
+                    const r = 44; // % — pushed slightly outward so balls don't overlap
                     const x = 50 + r * Math.cos(angleRad);
                     const y = 50 + r * Math.sin(angleRad);
                     return (
@@ -1423,7 +1478,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         className="absolute"
                         style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
                       >
-                        <LotteryBall number={i + 1} showNumber={true} hideShadow={true} className="w-7 h-7 md:w-10 md:h-10" />
+                        <LotteryBall number={i + 1} showNumber={true} hideShadow={true} className="w-5 h-5 md:w-8 md:h-8" />
                       </div>
                     );
                   })}
@@ -1522,12 +1577,45 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             </div>
           )}
 
+          {/* SHARED CONFETTI — fires for every style on settle (except curtain which has its own). */}
+          {revealStep === 'settled' && revealStyle !== 'curtain' && (
+            <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
+              {Array.from({ length: 50 }).map((_, i) => {
+                const colors = ['#ec4899', '#f97316', '#facc15', '#22c55e', '#06b6d4', '#a855f7', '#ffffff'];
+                const color = colors[i % colors.length];
+                const left = Math.random() * 100;
+                const delay = Math.random() * 0.8;
+                const duration = 2.5 + Math.random() * 1.5;
+                const drift = (Math.random() - 0.5) * 100;
+                const size = 8 + Math.random() * 10;
+                const shape = i % 2 === 0 ? '0' : '50%';
+                return (
+                  <div
+                    key={i}
+                    className="absolute top-0 animate-confetti-fall"
+                    style={{
+                      left: `${left}%`,
+                      width: `${size}px`,
+                      height: `${size * 0.4}px`,
+                      background: color,
+                      borderRadius: shape,
+                      animationDelay: `${delay}s`,
+                      animationDuration: `${duration}s`,
+                      ['--drift' as any]: `${drift}px`,
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
+
           {/* SHARED WINNER NAMEPLATE — appears once settled */}
-          <div className={`absolute bottom-[8vh] left-0 w-full text-center transition-all duration-700 delay-300 pointer-events-auto z-[50] ${revealStep === 'settled' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
-            <p className="text-pink-500 font-black uppercase tracking-[0.5em] text-[10px] mb-4">Saturday Draw Revealed</p>
+          <div className={`absolute bottom-[6vh] left-0 w-full text-center transition-all duration-700 delay-300 pointer-events-auto z-[50] ${revealStep === 'settled' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+            <p className="text-yellow-400 font-black uppercase tracking-[0.5em] text-xs md:text-sm mb-2 animate-pulse">🎉 Congratulations 🎉</p>
+            <p className="text-pink-500 font-black uppercase tracking-[0.5em] text-[10px] mb-3">Saturday Draw Winner</p>
             <h2 className="text-4xl md:text-7xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">{latestWin?.winner}</h2>
             <p className="text-yellow-400 font-black text-2xl md:text-5xl tracking-tighter drop-shadow-xl">£{latestWin?.prizeAmount || 0}</p>
-            <div className="mt-8">
+            <div className="mt-6">
               <button onClick={() => { cancelRevealAnimations(); setShowWinReveal(false); }} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
             </div>
           </div>
@@ -1542,6 +1630,16 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
               100% { transform: translate3d(var(--drift, 0px), 110vh, 0) rotate(720deg); opacity: 0.8; }
             }
             .animate-confetti-fall { animation: confettiFall linear forwards; }
+            @keyframes finalistShake {
+              0%, 100% { transform: translateX(0) translateY(0) rotate(0); }
+              10%      { transform: translateX(-6px) translateY(-2px) rotate(-3deg); }
+              25%      { transform: translateX(7px) translateY(2px) rotate(3deg); }
+              40%      { transform: translateX(-5px) translateY(0) rotate(-2deg); }
+              55%      { transform: translateX(6px) translateY(-3px) rotate(2deg); }
+              70%      { transform: translateX(-4px) translateY(2px) rotate(-2deg); }
+              85%      { transform: translateX(3px) translateY(0) rotate(1deg); }
+            }
+            .animate-finalist-shake { animation: finalistShake 0.4s ease-in-out infinite; }
           ` }} />
         </div>
       )}

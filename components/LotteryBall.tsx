@@ -62,17 +62,22 @@ export const LotteryBall: React.FC<BallProps> = ({
         {/* Specular Shine Overlay */}
         <div className="absolute top-[10%] left-[15%] w-[40%] h-[30%] bg-gradient-to-br from-white/40 to-transparent rounded-full blur-[2px] rotate-[-15deg]"></div>
 
-        {/* The Number Plate (Standardized) */}
+        {/* The Number Plate (SVG so the digits always scale with the ball size). */}
         <div className={`relative z-10 flex items-center justify-center w-[75%] h-[75%] rounded-full bg-white/5 border border-black/5 shadow-inner transition-opacity duration-1000 ${showNumber ? 'opacity-100' : 'opacity-0'}`}>
-          <span 
-            className="font-black text-[3.5vw] md:text-[1.8rem] lg:text-[2rem] leading-none tracking-tighter" 
-            style={{ 
-              color: styles.text,
-              textShadow: styles.text === '#ffffff' ? '0 1px 2px rgba(0,0,0,0.2)' : 'none'
-            }}
-          >
-            {displayNum}
-          </span>
+          <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible">
+            <text
+              x="50"
+              y="50"
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize="56"
+              fontWeight="900"
+              fill={styles.text}
+              style={{ letterSpacing: '-0.05em', fontFamily: 'inherit' }}
+            >
+              {displayNum}
+            </text>
+          </svg>
         </div>
       </div>
     </div>
