@@ -710,28 +710,51 @@ const isAdmin = useMemo(() => {
     }
   }, [latestWin, hasSeenLatestReveal]);
 
-  const startRevealSequence = () => {
+  type RevealStyle = 'cinematic' | 'vortex' | 'burst';
+  const startRevealSequence = (style: RevealStyle = 'cinematic') => {
     if (!latestWin) return;
     setShowWinReveal(true);
     setRevealStep('searching');
     const w = window.innerWidth;
     const h = window.innerHeight;
     const ballRadius = w < 768 ? 38 : 60;
+    const cx = w / 2;
+    const cy = h * 0.5;
     const colorStarters = [5, 15, 25, 35, 45, 55];
+    const winNum = latestWin!.ballNumber;
     const initialBalls: BallState[] = colorStarters.map((num, i) => {
-      const winNum = latestWin!.ballNumber;
       const isWinner = (num >= Math.floor(winNum / 10) * 10 && num < Math.ceil(winNum / 10) * 10) || (winNum < 10 && num < 10);
-      const angle = Math.random() * Math.PI * 2;
+      if (style === 'vortex') {
+        // Place evenly around a ring, tangential velocity for orbital motion
+        const a = (i / colorStarters.length) * Math.PI * 2;
+        const r = Math.min(w, h) * 0.32;
+        return {
+          id: i, num: isWinner ? winNum : num,
+          x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r,
+          vx: -Math.sin(a) * 8, vy: Math.cos(a) * 8,
+          radius: ballRadius, isWinner,
+        };
+      }
+      if (style === 'burst') {
+        // Stacked at centre, velocities radiating outward
+        const a = (i / colorStarters.length) * Math.PI * 2 + Math.random() * 0.4;
+        const speed = 22 + Math.random() * 8;
+        return {
+          id: i, num: isWinner ? winNum : num,
+          x: cx, y: cy,
+          vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+          radius: ballRadius, isWinner,
+        };
+      }
+      // cinematic — original chaotic bounce
+      const a = Math.random() * Math.PI * 2;
       const speed = 4 + Math.random() * 4;
       return {
-        id: i,
-        num: isWinner ? winNum : num,
+        id: i, num: isWinner ? winNum : num,
         x: Math.random() * (w - 200) + 100,
         y: Math.random() * (h - 200) + 100,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        radius: ballRadius,
-        isWinner,
+        vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+        radius: ballRadius, isWinner,
       };
     });
     revealRef.current = initialBalls;
@@ -779,19 +802,69 @@ const isAdmin = useMemo(() => {
       const balls = revealRef.current;
       const winningBall = balls.find((b) => b.isWinner)!;
 
-      // Physics: bounce all balls except during homing for the winner
-      const damping = phase === 'suspense' ? 0.985 : 1;
-      for (let i = 0; i < balls.length; i++) {
-        const b = balls[i];
-        if (phase === 'homing' && b.isWinner) continue;
-        b.vx *= damping;
-        b.vy *= damping;
-        b.x += b.vx;
-        b.y += b.vy;
-        if (b.x < b.radius) { b.vx = Math.abs(b.vx); b.x = b.radius; }
-        else if (b.x > w - b.radius) { b.vx = -Math.abs(b.vx); b.x = w - b.radius; }
-        if (b.y < b.radius) { b.vy = Math.abs(b.vy); b.y = b.radius; }
-        else if (b.y > h - b.radius) { b.vy = -Math.abs(b.vy); b.y = h - b.radius; }
+      // Style-specific physics
+      if (style === 'vortex') {
+        // Orbital pull toward centre; winner spirals inward, others keep orbiting
+        for (let i = 0; i < balls.length; i++) {
+          const b = balls[i];
+          const dx = cx - b.x;
+          const dy = cy - b.y;
+          const dist = Math.max(20, Math.sqrt(dx * dx + dy * dy));
+          // Tangential push to maintain orbit
+          const tx = -dy / dist;
+          const ty = dx / dist;
+          b.vx += tx * 0.3;
+          b.vy += ty * 0.3;
+          // Pull toward centre, stronger over time for the winner
+          const pullStrength = b.isWinner ? Math.min(0.04, elapsed / 100000) : 0.005;
+          b.vx += (dx / dist) * pullStrength * dist * 0.05;
+          b.vy += (dy / dist) * pullStrength * dist * 0.05;
+          // Speed cap + slight damping
+          const speed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+          const maxSpeed = b.isWinner ? 14 : 10;
+          if (speed > maxSpeed) { b.vx = (b.vx / speed) * maxSpeed; b.vy = (b.vy / speed) * maxSpeed; }
+          b.x += b.vx;
+          b.y += b.vy;
+        }
+      } else if (style === 'burst') {
+        // Outward velocity, then gravity pulls non-winners off-screen; winner decelerates and floats
+        const gravity = 0.55;
+        for (let i = 0; i < balls.length; i++) {
+          const b = balls[i];
+          if (b.isWinner && phase === 'homing') continue;
+          if (b.isWinner) {
+            // Decelerate and float toward target
+            b.vx *= 0.96;
+            b.vy *= 0.96;
+          } else {
+            b.vy += gravity;
+            b.vx *= 0.998;
+          }
+          b.x += b.vx;
+          b.y += b.vy;
+          // Walls: winner bounces softly; others don't (let them fall off)
+          if (b.isWinner) {
+            if (b.x < b.radius) { b.vx = Math.abs(b.vx) * 0.6; b.x = b.radius; }
+            else if (b.x > w - b.radius) { b.vx = -Math.abs(b.vx) * 0.6; b.x = w - b.radius; }
+            if (b.y < b.radius) { b.vy = Math.abs(b.vy) * 0.6; b.y = b.radius; }
+            else if (b.y > h - b.radius) { b.vy = -Math.abs(b.vy) * 0.6; b.y = h - b.radius; }
+          }
+        }
+      } else {
+        // cinematic: full-wall bounce, light damping during suspense
+        const damping = phase === 'suspense' ? 0.985 : 1;
+        for (let i = 0; i < balls.length; i++) {
+          const b = balls[i];
+          if (phase === 'homing' && b.isWinner) continue;
+          b.vx *= damping;
+          b.vy *= damping;
+          b.x += b.vx;
+          b.y += b.vy;
+          if (b.x < b.radius) { b.vx = Math.abs(b.vx); b.x = b.radius; }
+          else if (b.x > w - b.radius) { b.vx = -Math.abs(b.vx); b.x = w - b.radius; }
+          if (b.y < b.radius) { b.vy = Math.abs(b.vy); b.y = b.radius; }
+          else if (b.y > h - b.radius) { b.vy = -Math.abs(b.vy); b.y = h - b.radius; }
+        }
       }
 
       // Spotlight + phase logic
@@ -1777,6 +1850,39 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         >
                           View Ledger
                         </button>
+                      </div>
+
+                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 md:p-10 shadow-2xl">
+                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Reveal Lab</h4>
+                        <p className="text-[11px] text-white/40 mb-6">Preview each animation style. Pick one and I'll wire it as the default.</p>
+                        {!latestWin && (
+                          <p className="text-xs text-white/50 italic">No latest winner to preview — record a draw first.</p>
+                        )}
+                        {latestWin && (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <button
+                              onClick={() => startRevealSequence('cinematic')}
+                              className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all"
+                            >
+                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Cinematic</span>
+                              <span className="text-[10px] text-white/50">Spotlight searches, winner glides in</span>
+                            </button>
+                            <button
+                              onClick={() => startRevealSequence('vortex')}
+                              className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all"
+                            >
+                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Vortex</span>
+                              <span className="text-[10px] text-white/50">Balls orbit, winner spirals to centre</span>
+                            </button>
+                            <button
+                              onClick={() => startRevealSequence('burst')}
+                              className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all"
+                            >
+                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Burst</span>
+                              <span className="text-[10px] text-white/50">Explode outward, others fall, winner floats</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="space-y-8">
