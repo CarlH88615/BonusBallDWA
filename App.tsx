@@ -1541,19 +1541,21 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
           {/* SLOT MACHINE — single big number cycling */}
           {revealStyle === 'slot' && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="relative text-center">
-                <p className={`text-[11px] font-black uppercase tracking-[0.5em] mb-8 transition-colors ${revealStep === 'settled' ? 'text-yellow-400' : 'text-pink-500 animate-pulse'}`}>
+            <div className="absolute inset-0 flex items-center justify-center px-4">
+              <div className="relative flex flex-col items-center max-w-full">
+                <p className={`text-[10px] md:text-[11px] font-black uppercase tracking-[0.5em] mb-6 md:mb-8 transition-colors ${revealStep === 'settled' ? 'text-yellow-400' : 'text-pink-500 animate-pulse'}`}>
                   {revealStep === 'settled' ? '★ LOCKED IN ★' : 'Drawing'}
                 </p>
-                {/* Radiating rays behind the ball on settle */}
-                {revealStep === 'settled' && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-[120%] h-[120%] rounded-full animate-slot-rays" style={{ background: 'conic-gradient(from 0deg, transparent 0deg, rgba(250,204,21,0.25) 10deg, transparent 30deg, transparent 60deg, rgba(250,204,21,0.25) 70deg, transparent 90deg, transparent 120deg, rgba(250,204,21,0.25) 130deg, transparent 150deg, transparent 180deg, rgba(250,204,21,0.25) 190deg, transparent 210deg, transparent 240deg, rgba(250,204,21,0.25) 250deg, transparent 270deg, transparent 300deg, rgba(250,204,21,0.25) 310deg, transparent 330deg, transparent 360deg)' }} />
-                  </div>
-                )}
-                <div className={`mx-auto inline-block relative transition-transform duration-700 ease-out ${revealStep === 'settled' ? 'scale-[1.4] drop-shadow-[0_0_140px_rgba(250,204,21,0.7)]' : 'scale-100'}`}>
-                  <LotteryBall number={slotNumber} hideShadow={false} showNumber={true} className="w-[260px] h-[260px] md:w-[420px] md:h-[420px]" />
+                {/* Wrapper sized to the ball so rays scale relative to it (not the whole screen) */}
+                <div
+                  className={`relative transition-transform duration-700 ease-out ${revealStep === 'settled' ? 'scale-110 md:scale-[1.3] drop-shadow-[0_0_120px_rgba(250,204,21,0.7)]' : 'scale-100'}`}
+                  style={{ width: 'min(58vmin, 380px)', height: 'min(58vmin, 380px)' }}
+                >
+                  {/* Radiating rays sit behind the ball at 120% of its size */}
+                  {revealStep === 'settled' && (
+                    <div className="absolute -inset-[10%] rounded-full animate-slot-rays pointer-events-none" style={{ background: 'conic-gradient(from 0deg, transparent 0deg, rgba(250,204,21,0.25) 10deg, transparent 30deg, transparent 60deg, rgba(250,204,21,0.25) 70deg, transparent 90deg, transparent 120deg, rgba(250,204,21,0.25) 130deg, transparent 150deg, transparent 180deg, rgba(250,204,21,0.25) 190deg, transparent 210deg, transparent 240deg, rgba(250,204,21,0.25) 250deg, transparent 270deg, transparent 300deg, rgba(250,204,21,0.25) 310deg, transparent 330deg, transparent 360deg)' }} />
+                  )}
+                  <LotteryBall number={slotNumber} hideShadow={false} showNumber={true} className="w-full h-full" />
                 </div>
               </div>
             </div>
@@ -1585,7 +1587,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   <p className={`font-black uppercase tracking-[0.4em] mb-6 md:mb-12 transition-all duration-500 ${bingoFinale.phase === 'crown' ? 'opacity-0 text-yellow-400 text-2xl' : bingoFinale.phase === 'rally' ? 'text-pink-500 text-2xl md:text-4xl animate-pulse scale-110' : 'text-pink-500 text-xl md:text-3xl'}`}>
                     {bingoFinale.phase === 'rally' ? '⚡ FINAL THREE ⚡' : bingoFinale.phase === 'shake3' ? 'Who Will It Be?' : bingoFinale.phase === 'elim1' || bingoFinale.phase === 'shake2' ? 'Down to Two…' : bingoFinale.phase === 'elim2' ? 'One Remains…' : ''}
                   </p>
-                  <div className="flex items-center justify-center gap-6 md:gap-16 transition-all duration-700">
+                  <div className="flex items-center justify-center gap-3 sm:gap-6 md:gap-16 transition-all duration-700 px-4">
                     {bingoFinale.finalists.map((num, idx) => {
                       const isWinner = num === latestWin?.ballNumber;
                       const phase = bingoFinale.phase;
@@ -1595,16 +1597,16 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         (phase === 'shake3') ||
                         (phase === 'shake2' && idx !== 0);
                       const crowned = phase === 'crown' && isWinner;
-                      // Mid-explosion: pulse red just before exploding out
                       const flashing =
                         (idx === 0 && phase === 'elim1') ||
                         (idx === 1 && phase === 'elim2');
                       return (
                         <div
                           key={`${num}-${idx}`}
-                          className={`relative transition-all ease-out ${explodedOut ? 'duration-500 opacity-0 scale-0 rotate-[720deg]' : crowned ? 'duration-1000 scale-[1.8] drop-shadow-[0_0_100px_rgba(250,204,21,0.95)]' : 'duration-300 opacity-100 scale-100'} ${shaking ? 'animate-finalist-shake' : ''} ${flashing ? 'animate-finalist-flash' : ''}`}
+                          className={`relative transition-all ease-out ${explodedOut ? 'duration-500 opacity-0 scale-0 rotate-[720deg]' : crowned ? 'duration-1000 scale-150 sm:scale-[1.7] md:scale-[1.8] drop-shadow-[0_0_80px_rgba(250,204,21,0.95)]' : 'duration-300 opacity-100 scale-100'} ${shaking ? 'animate-finalist-shake' : ''} ${flashing ? 'animate-finalist-flash' : ''}`}
+                          style={{ width: 'min(26vw, 224px)', height: 'min(26vw, 224px)' }}
                         >
-                          <LotteryBall number={num} showNumber={true} className="w-36 h-36 md:w-56 md:h-56" />
+                          <LotteryBall number={num} showNumber={true} className="w-full h-full" />
                         </div>
                       );
                     })}
@@ -1651,8 +1653,14 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
           {revealStyle === 'curtain' && (
             <div className="absolute inset-0 overflow-hidden">
               {/* The revealed ball behind the curtains — zooms in dramatically when curtains open */}
-              <div className={`absolute inset-0 flex items-center justify-center transition-all ease-out ${curtainPhase === 'open' ? 'opacity-100 scale-100 duration-1000' : 'opacity-0 scale-50 duration-300'}`}>
-                <LotteryBall number={latestWin?.ballNumber ?? 1} showNumber={true} className="w-72 h-72 md:w-[28rem] md:h-[28rem] drop-shadow-[0_0_100px_rgba(250,204,21,0.8)]" />
+              <div className={`absolute inset-0 flex items-center justify-center px-4 transition-all ease-out ${curtainPhase === 'open' ? 'opacity-100 scale-100 duration-1000' : 'opacity-0 scale-50 duration-300'}`}>
+                <div style={{ width: 'min(65vmin, 28rem)', height: 'min(65vmin, 28rem)' }} className="flex items-center justify-center">
+                  <LotteryBall
+                    number={latestWin?.ballNumber ?? 1}
+                    showNumber={true}
+                    className="w-full h-full drop-shadow-[0_0_80px_rgba(250,204,21,0.8)]"
+                  />
+                </div>
               </div>
               {/* Confetti — 40 pieces falling with random colours and delays */}
               {curtainPhase === 'open' && (
