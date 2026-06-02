@@ -115,8 +115,10 @@ const App: React.FC = () => {
   const [bingoGrid, setBingoGrid] = useState<Array<{ num: number; eliminated: boolean }>>([]);
   const [bingoFinale, setBingoFinale] = useState<{
     phase: 'idle' | 'rally' | 'shake3' | 'elim1' | 'shake2' | 'elim2' | 'crown';
-    finalists: number[]; // [loser1, loser2, winner] order — eliminated in 0, 1
-  }>({ phase: 'idle', finalists: [] });
+    finalists: number[]; // 3 ball numbers in randomised display order
+    winnerIdx: number;   // which display position holds the actual winner
+    elimOrder: number[]; // the two non-winner display indices, in elimination order
+  }>({ phase: 'idle', finalists: [], winnerIdx: -1, elimOrder: [] });
   const [tileGrid, setTileGrid] = useState<Array<{ num: number; flipped: boolean; display: number }>>([]);
   const [curtainPhase, setCurtainPhase] = useState<'closed' | 'shake' | 'opening' | 'open'>('closed');
   const revealRequestRef = useRef<number>(null);
@@ -939,8 +941,13 @@ const isAdmin = useMemo(() => {
     };
 
     const beginFinale = () => {
-      const finalists = [otherFinalists[0], otherFinalists[1], winNum];
-      setBingoFinale({ phase: 'rally', finalists });
+      // Sort numerically so the winner's screen position varies naturally with their
+      // number — no positional tell. Randomise which of the two losers explodes first.
+      const finalists = [otherFinalists[0], otherFinalists[1], winNum].sort((a, b) => a - b);
+      const winnerIdx = finalists.indexOf(winNum);
+      const loserIdxs = [0, 1, 2].filter((i) => i !== winnerIdx);
+      const elimOrder = Math.random() < 0.5 ? loserIdxs : [loserIdxs[1], loserIdxs[0]];
+      setBingoFinale({ phase: 'rally', finalists, winnerIdx, elimOrder });
       playWhoosh();
       const tShake = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'shake3' })), 800);
       const tElim1 = setTimeout(() => { setBingoFinale((s) => ({ ...s, phase: 'elim1' })); playExplosion(); }, 2200);
@@ -1041,7 +1048,7 @@ const isAdmin = useMemo(() => {
     setRevealStep('running');
     setSlotNumber(1);
     setBingoGrid([]);
-    setBingoFinale({ phase: 'idle', finalists: [] });
+    setBingoFinale({ phase: 'idle', finalists: [], winnerIdx: -1, elimOrder: [] });
     setTileGrid([]);
     setCurtainPhase('closed');
     // Reset wheel rotation if it was previously animated
@@ -1589,17 +1596,19 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   </p>
                   <div className="flex items-center justify-center gap-3 sm:gap-6 md:gap-16 transition-all duration-700 px-4">
                     {bingoFinale.finalists.map((num, idx) => {
-                      const isWinner = num === latestWin?.ballNumber;
+                      const isWinner = idx === bingoFinale.winnerIdx;
                       const phase = bingoFinale.phase;
-                      const explodedOut = (idx === 0 && (phase === 'elim1' || phase === 'shake2' || phase === 'elim2' || phase === 'crown'))
-                        || (idx === 1 && (phase === 'elim2' || phase === 'crown'));
+                      const firstOut = bingoFinale.elimOrder[0];
+                      const secondOut = bingoFinale.elimOrder[1];
+                      const explodedOut = (idx === firstOut && (phase === 'elim1' || phase === 'shake2' || phase === 'elim2' || phase === 'crown'))
+                        || (idx === secondOut && (phase === 'elim2' || phase === 'crown'));
                       const shaking =
                         (phase === 'shake3') ||
-                        (phase === 'shake2' && idx !== 0);
+                        (phase === 'shake2' && idx !== firstOut);
                       const crowned = phase === 'crown' && isWinner;
                       const flashing =
-                        (idx === 0 && phase === 'elim1') ||
-                        (idx === 1 && phase === 'elim2');
+                        (idx === firstOut && phase === 'elim1') ||
+                        (idx === secondOut && phase === 'elim2');
                       return (
                         <div
                           key={`${num}-${idx}`}
