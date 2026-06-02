@@ -1363,54 +1363,73 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">
                 <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-8 animate-pulse">Drawing</p>
-                <div className={`mx-auto rounded-3xl border-4 ${revealStep === 'settled' ? 'border-yellow-400' : 'border-white/10'} bg-black/40 px-10 py-6 inline-block transition-all duration-500 ${revealStep === 'settled' ? 'scale-110 shadow-[0_0_120px_rgba(250,204,21,0.6)]' : ''}`}>
-                  <span className={`block font-black tracking-tighter ${revealStep === 'settled' ? 'text-yellow-400' : 'text-white'} text-[180px] md:text-[260px] leading-none drop-shadow-[0_0_40px_rgba(255,255,255,0.4)]`}>
-                    {String(slotNumber).padStart(2, '0')}
-                  </span>
+                <div className={`mx-auto inline-block transition-transform duration-500 ${revealStep === 'settled' ? 'scale-125 drop-shadow-[0_0_120px_rgba(250,204,21,0.6)]' : 'scale-100'}`}>
+                  <LotteryBall number={slotNumber} hideShadow={false} showNumber={true} className="w-[260px] h-[260px] md:w-[400px] md:h-[400px]" />
                 </div>
+                {revealStep === 'settled' && (
+                  <p className="mt-6 text-yellow-400 font-black uppercase tracking-[0.4em] text-sm animate-pulse">Locked in</p>
+                )}
               </div>
             </div>
           )}
 
           {/* BINGO ELIMINATION — 59 balls, eliminate one by one */}
           {revealStyle === 'bingo' && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-10">
-              <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-6">Last Ball Standing</p>
-              <div className="grid grid-cols-10 gap-2 md:gap-3 max-w-4xl">
-                {bingoGrid.map((b) => (
-                  <div
-                    key={b.num}
-                    className={`relative aspect-square flex items-center justify-center transition-all duration-300 ${b.eliminated ? 'opacity-0 scale-50' : revealStep === 'settled' ? 'opacity-100 scale-150' : 'opacity-100 scale-100'}`}
-                  >
-                    <LotteryBall number={b.num} className="w-full h-full" />
-                  </div>
-                ))}
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-8">
+              <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-4 md:mb-6">Last Ball Standing</p>
+              <div className="grid grid-cols-8 gap-2 md:gap-3 w-full max-w-2xl px-2">
+                {bingoGrid.map((b) => {
+                  const isWinner = b.num === latestWin?.ballNumber;
+                  const settledWinner = revealStep === 'settled' && isWinner;
+                  return (
+                    <div
+                      key={b.num}
+                      className={`relative aspect-square flex items-center justify-center transition-all duration-500 ${
+                        b.eliminated
+                          ? 'opacity-0 scale-0 rotate-180'
+                          : settledWinner
+                          ? 'opacity-100 scale-[2] z-10 drop-shadow-[0_0_40px_rgba(250,204,21,0.8)]'
+                          : 'opacity-100 scale-100'
+                      }`}
+                      style={{ transitionTimingFunction: b.eliminated ? 'cubic-bezier(0.4, 0, 1, 1)' : 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+                    >
+                      <LotteryBall number={b.num} showNumber={true} className="w-full h-full" />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {/* WHEEL OF FORTUNE — spinning wheel with pointer */}
+          {/* WHEEL OF FORTUNE — spinning wheel with bonus balls around the edge */}
           {revealStyle === 'wheel' && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="relative w-[90vmin] h-[90vmin] max-w-[800px] max-h-[800px]">
+              <div className="relative w-[92vmin] h-[92vmin] max-w-[760px] max-h-[760px]">
                 {/* pointer */}
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-2 w-0 h-0 border-l-[18px] border-r-[18px] border-t-[28px] border-l-transparent border-r-transparent border-t-yellow-400 z-20 drop-shadow-lg" />
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-3 w-0 h-0 border-l-[20px] border-r-[20px] border-t-[34px] border-l-transparent border-r-transparent border-t-yellow-400 z-30 drop-shadow-[0_4px_12px_rgba(0,0,0,0.6)]" />
                 {/* wheel */}
-                <div ref={wheelElRef} className="absolute inset-0 rounded-full border-4 border-white/10 shadow-[0_0_60px_rgba(236,72,153,0.3)]" style={{ background: 'conic-gradient(from -90deg, #ec4899, #f97316, #facc15, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899)' }}>
+                <div ref={wheelElRef} className="absolute inset-0 rounded-full border-[6px] border-yellow-400/40 shadow-[0_0_80px_rgba(236,72,153,0.4),inset_0_0_60px_rgba(0,0,0,0.5)]" style={{ background: 'conic-gradient(from -90deg, #ec4899, #f97316, #facc15, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899)' }}>
                   {Array.from({ length: 59 }, (_, i) => {
-                    const angle = (i * 360) / 59;
+                    // Each ball positioned around the wheel edge. -90deg so first ball is at top.
+                    const angleDeg = (i * 360) / 59 - 90;
+                    const angleRad = (angleDeg * Math.PI) / 180;
+                    // Distance from centre as percentage of wheel radius
+                    const r = 42; // %
+                    const x = 50 + r * Math.cos(angleRad);
+                    const y = 50 + r * Math.sin(angleRad);
                     return (
                       <div
                         key={i}
-                        className="absolute left-1/2 top-1/2 origin-top -translate-x-1/2 text-white font-black text-[10px] md:text-xs"
-                        style={{ transform: `translate(-50%, 0) rotate(${angle}deg) translateY(8px)` }}
+                        className="absolute"
+                        style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
                       >
-                        {i + 1}
+                        <LotteryBall number={i + 1} showNumber={true} hideShadow={true} className="w-7 h-7 md:w-10 md:h-10" />
                       </div>
                     );
                   })}
-                  <div className="absolute inset-[36%] rounded-full bg-black flex items-center justify-center border-2 border-white/20">
-                    <span className="text-pink-500 font-black uppercase tracking-widest text-[10px]">Draw</span>
+                  {/* inner hub */}
+                  <div className="absolute inset-[34%] rounded-full bg-gradient-to-br from-neutral-800 to-black flex items-center justify-center border-4 border-yellow-400/60 shadow-[inset_0_0_30px_rgba(0,0,0,0.8)]">
+                    <span className="text-yellow-400 font-black uppercase tracking-[0.3em] text-xs md:text-base">Draw</span>
                   </div>
                 </div>
               </div>
@@ -1419,24 +1438,26 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
           {/* TILE FLIP — 59 face-down cards flip in sequence */}
           {revealStyle === 'tile' && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-10">
-              <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-6">Turn Them Over</p>
-              <div className="grid grid-cols-10 gap-1.5 md:gap-2 max-w-3xl">
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-8">
+              <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-4 md:mb-6">Turn Them Over</p>
+              <div className="grid grid-cols-8 gap-2 md:gap-3 w-full max-w-2xl px-2">
                 {tileGrid.map((tile) => {
                   const isWinner = tile.num === latestWin?.ballNumber;
                   const showFace = tile.flipped;
                   return (
-                    <div key={tile.num} className="relative aspect-square" style={{ perspective: '600px' }}>
+                    <div key={tile.num} className="relative aspect-square" style={{ perspective: '800px' }}>
                       <div
-                        className="absolute inset-0 transition-transform duration-500"
+                        className="absolute inset-0 transition-transform duration-500 ease-out"
                         style={{ transformStyle: 'preserve-3d', transform: showFace ? 'rotateY(180deg)' : 'rotateY(0)' }}
                       >
-                        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/5 border border-white/10 text-white/40 font-black" style={{ backfaceVisibility: 'hidden' }}>?</div>
+                        {/* back */}
+                        <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-gradient-to-br from-pink-500/20 to-pink-500/5 border border-pink-500/30 text-pink-400/80 font-black text-xl md:text-2xl" style={{ backfaceVisibility: 'hidden' }}>?</div>
+                        {/* front — real lottery ball */}
                         <div
-                          className={`absolute inset-0 flex items-center justify-center rounded-lg font-black text-xs md:text-sm ${isWinner && showFace ? 'bg-yellow-400 text-black shadow-[0_0_30px_rgba(250,204,21,0.8)] scale-110' : 'bg-pink-500/20 border border-pink-500/40 text-white'}`}
+                          className={`absolute inset-0 flex items-center justify-center rounded-xl ${isWinner && showFace ? 'bg-yellow-400/20 ring-4 ring-yellow-400 shadow-[0_0_30px_rgba(250,204,21,0.8)] scale-110' : ''}`}
                           style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
                         >
-                          {tile.num}
+                          <LotteryBall number={tile.num} showNumber={true} hideShadow={true} className="w-full h-full" />
                         </div>
                       </div>
                     </div>
@@ -1446,24 +1467,57 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             </div>
           )}
 
-          {/* STAGE CURTAINS — drape opens to reveal winner */}
+          {/* STAGE CURTAINS — drape opens, ball zooms in, confetti rains */}
           {revealStyle === 'curtain' && (
             <div className="absolute inset-0 overflow-hidden">
-              {/* The revealed ball behind the curtains */}
-              <div className={`absolute inset-0 flex items-center justify-center transition-opacity duration-700 ${curtainPhase === 'open' ? 'opacity-100' : 'opacity-0'}`}>
-                <LotteryBall number={latestWin?.ballNumber ?? 1} className="w-64 h-64 md:w-96 md:h-96 drop-shadow-[0_0_80px_rgba(250,204,21,0.6)]" />
+              {/* The revealed ball behind the curtains — zooms in dramatically when curtains open */}
+              <div className={`absolute inset-0 flex items-center justify-center transition-all ease-out ${curtainPhase === 'open' ? 'opacity-100 scale-100 duration-1000' : 'opacity-0 scale-50 duration-300'}`}>
+                <LotteryBall number={latestWin?.ballNumber ?? 1} showNumber={true} className="w-72 h-72 md:w-[28rem] md:h-[28rem] drop-shadow-[0_0_100px_rgba(250,204,21,0.8)]" />
               </div>
+              {/* Confetti — 40 pieces falling with random colours and delays */}
+              {curtainPhase === 'open' && (
+                <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden">
+                  {Array.from({ length: 40 }).map((_, i) => {
+                    const colors = ['#ec4899', '#f97316', '#facc15', '#22c55e', '#06b6d4', '#a855f7', '#ffffff'];
+                    const color = colors[i % colors.length];
+                    const left = Math.random() * 100;
+                    const delay = Math.random() * 0.6;
+                    const duration = 2.5 + Math.random() * 1.5;
+                    const drift = (Math.random() - 0.5) * 80;
+                    const size = 8 + Math.random() * 10;
+                    const shape = i % 2 === 0 ? '0' : '50%';
+                    return (
+                      <div
+                        key={i}
+                        className="absolute top-0 animate-confetti-fall"
+                        style={{
+                          left: `${left}%`,
+                          width: `${size}px`,
+                          height: `${size * 0.4}px`,
+                          background: color,
+                          borderRadius: shape,
+                          animationDelay: `${delay}s`,
+                          animationDuration: `${duration}s`,
+                          ['--drift' as any]: `${drift}px`,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
               {/* Left curtain */}
               <div
-                className={`absolute top-0 bottom-0 left-0 w-1/2 bg-gradient-to-r from-red-900 to-red-700 shadow-[0_0_60px_rgba(0,0,0,0.6)] transition-transform ${curtainPhase === 'opening' || curtainPhase === 'open' ? 'duration-[2000ms] -translate-x-full' : curtainPhase === 'shake' ? 'animate-curtain-shake-l' : ''}`}
+                className={`absolute top-0 bottom-0 left-0 w-1/2 z-10 shadow-[0_0_60px_rgba(0,0,0,0.6)] transition-transform ${curtainPhase === 'opening' || curtainPhase === 'open' ? 'duration-[2000ms] -translate-x-full ease-in-out' : curtainPhase === 'shake' ? 'animate-curtain-shake-l' : ''}`}
+                style={{ background: 'repeating-linear-gradient(90deg, #7f1d1d 0, #991b1b 16px, #7f1d1d 32px), linear-gradient(to right, #450a0a, #991b1b)' }}
               />
               {/* Right curtain */}
               <div
-                className={`absolute top-0 bottom-0 right-0 w-1/2 bg-gradient-to-l from-red-900 to-red-700 shadow-[0_0_60px_rgba(0,0,0,0.6)] transition-transform ${curtainPhase === 'opening' || curtainPhase === 'open' ? 'duration-[2000ms] translate-x-full' : curtainPhase === 'shake' ? 'animate-curtain-shake-r' : ''}`}
+                className={`absolute top-0 bottom-0 right-0 w-1/2 z-10 shadow-[0_0_60px_rgba(0,0,0,0.6)] transition-transform ${curtainPhase === 'opening' || curtainPhase === 'open' ? 'duration-[2000ms] translate-x-full ease-in-out' : curtainPhase === 'shake' ? 'animate-curtain-shake-r' : ''}`}
+                style={{ background: 'repeating-linear-gradient(90deg, #7f1d1d 0, #991b1b 16px, #7f1d1d 32px), linear-gradient(to left, #450a0a, #991b1b)' }}
               />
               {/* Building-tension label while closed */}
               {curtainPhase !== 'open' && (
-                <p className="absolute bottom-[15vh] left-0 w-full text-center text-yellow-400 font-black uppercase tracking-[0.5em] text-xs animate-pulse z-10">And the winner is…</p>
+                <p className="absolute bottom-[15vh] left-0 w-full text-center text-yellow-400 font-black uppercase tracking-[0.5em] text-xs md:text-sm animate-pulse z-20">And the winner is…</p>
               )}
             </div>
           )}
@@ -1483,6 +1537,11 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             @keyframes curtainShakeR { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(3px); } 50% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
             .animate-curtain-shake-l { animation: curtainShakeL 0.15s ease-in-out infinite; }
             .animate-curtain-shake-r { animation: curtainShakeR 0.15s ease-in-out infinite; }
+            @keyframes confettiFall {
+              0%   { transform: translate3d(0, -10vh, 0) rotate(0deg); opacity: 1; }
+              100% { transform: translate3d(var(--drift, 0px), 110vh, 0) rotate(720deg); opacity: 0.8; }
+            }
+            .animate-confetti-fall { animation: confettiFall linear forwards; }
           ` }} />
         </div>
       )}
