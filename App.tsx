@@ -123,6 +123,112 @@ const App: React.FC = () => {
     localStorage.setItem('onboarding_v1_seen', 'true');
     setSeenOnboarding(true);
   };
+  // Audio: generated tones via Web Audio API, no external assets. AudioContext is created
+  // lazily on first user interaction (browser autoplay policies).
+  const [muted, setMuted] = useState<boolean>(
+    typeof window !== 'undefined' && localStorage.getItem('reveal_muted') === 'true'
+  );
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const ensureAudio = (): AudioContext | null => {
+    if (muted) return null;
+    if (!audioCtxRef.current) {
+      try {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      } catch {
+        return null;
+      }
+    }
+    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+    return audioCtxRef.current;
+  };
+  const toggleMuted = () => {
+    const next = !muted;
+    setMuted(next);
+    localStorage.setItem('reveal_muted', String(next));
+  };
+  const playTone = (freq: number, durationMs: number, volume = 0.15, type: OscillatorType = 'square') => {
+    const ctx = ensureAudio(); if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    osc.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(volume, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationMs / 1000);
+    osc.start();
+    osc.stop(ctx.currentTime + durationMs / 1000);
+  };
+  const playTick = () => playTone(1400, 30, 0.08, 'square');
+  const playClick = () => playTone(800, 50, 0.10, 'triangle');
+  const playThunk = () => {
+    const ctx = ensureAudio(); if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(180, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.35);
+    osc.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.45, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.5);
+  };
+  const playChime = (freq: number, durMs = 700) => {
+    const ctx = ensureAudio(); if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    osc.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durMs / 1000);
+    osc.start();
+    osc.stop(ctx.currentTime + durMs / 1000);
+  };
+  const playFanfare = () => {
+    // C major ascending then big top note
+    [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => playChime(f, 600), i * 90));
+  };
+  const playSad = () => {
+    // Minor-third descending for rollover (no winner)
+    [392, 330, 262].forEach((f, i) => setTimeout(() => playChime(f, 500), i * 180));
+  };
+  const playExplosion = () => {
+    const ctx = ensureAudio(); if (!ctx) return;
+    const bufferSize = Math.floor(ctx.sampleRate * 0.4);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 2);
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 600;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.5;
+    noise.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+    noise.start();
+    noise.stop(ctx.currentTime + 0.4);
+  };
+  const playWhoosh = () => {
+    const ctx = ensureAudio(); if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(80, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.6);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 600;
+    filter.Q.value = 2;
+    osc.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.2);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.8);
+  };
+
   const [toast, setToast] = useState<{ kind: 'error' | 'success' | 'info'; message: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = (kind: 'error' | 'success' | 'info', message: string) => {
@@ -440,15 +546,19 @@ const isAdmin = useMemo(() => {
   // pastResults store was session-only and never hydrated, so the Saturday reveal
   // animation was effectively dead.
   const latestWin = useMemo(() => {
-    const completed = (winnerRows ?? []).find((r: any) => r.winning_number && r.winner_name);
+    // Most recent completed draw — INCLUDES rollovers (no winner_name) so the reveal
+    // still plays and the home card still updates after every draw, not just paid ones.
+    const completed = (winnerRows ?? []).find((r: any) => r.winning_number);
     if (!completed) return null;
     return {
-      id: completed.id, // stable key for the "seen-this-reveal" localStorage flag
+      id: completed.id,
       date: completed.draw_date,
       ballNumber: Number(completed.winning_number),
       winner: completed.winner_name,
       prizeAmount: Number(completed.amount_won) || 0,
       charityAmount: 0,
+      rolloverAmount: Number(completed.rollover_amount) || 0,
+      isRollover: !completed.winner_name,
     };
   }, [winnerRows]);
   const handleRecordResult = async () => {
@@ -723,34 +833,38 @@ const isAdmin = useMemo(() => {
     revealTimeoutsRef.current = [];
   };
 
-  const startSlotReveal = (winNum: number) => {
-    const total = 6500; // ms
+  const startSlotReveal = (winNum: number, isRollover: boolean) => {
+    const total = 6500;
     const start = performance.now();
+    let tickCount = 0;
     const tick = () => {
       const elapsed = performance.now() - start;
       if (elapsed >= total) {
         setSlotNumber(winNum);
         setRevealStep('settled');
         revealRequestRef.current = null;
+        playThunk();
+        setTimeout(() => (isRollover ? playSad() : playFanfare()), 250);
         return;
       }
-      // Interval grows as we approach the end — fast at first, slow at the end
       const progress = elapsed / total;
-      const intervalMs = 50 + Math.pow(progress, 3) * 700; // 50ms → 750ms
-      // Last 600ms: lock to a sequence approaching the winner
+      const intervalMs = 50 + Math.pow(progress, 3) * 700;
       if (total - elapsed < 600) {
         const candidates = [winNum, winNum, ((winNum + 17) % 59) + 1, winNum];
         setSlotNumber(candidates[Math.floor(elapsed / 150) % candidates.length]);
       } else {
         setSlotNumber(Math.floor(Math.random() * 59) + 1);
       }
+      // Every 2nd tick to avoid audio overload at fast cycle speeds
+      if (tickCount % 2 === 0) playTick();
+      tickCount++;
       const t = setTimeout(tick, intervalMs);
       revealTimeoutsRef.current.push(t);
     };
     tick();
   };
 
-  const startBingoReveal = (winNum: number) => {
+  const startBingoReveal = (winNum: number, isRollover: boolean) => {
     // Build the 59-ball grid in numerical order
     const grid = Array.from({ length: 59 }, (_, i) => ({ num: i + 1, eliminated: false }));
     setBingoGrid(grid);
@@ -773,6 +887,8 @@ const isAdmin = useMemo(() => {
       }
       const targetNum = toEliminateInGrid[i];
       setBingoGrid((prev) => prev.map((b) => (b.num === targetNum ? { ...b, eliminated: true } : b)));
+      // Subtle pop on each elimination — frequency varies for texture
+      playTone(280 + (targetNum * 7) % 200, 60, 0.10, 'triangle');
       i++;
       const remaining = toEliminateInGrid.length - i;
       let delay: number;
@@ -784,15 +900,19 @@ const isAdmin = useMemo(() => {
     };
 
     const beginFinale = () => {
-      // Finalists array: [loser1, loser2, winner] for clarity
       const finalists = [otherFinalists[0], otherFinalists[1], winNum];
       setBingoFinale({ phase: 'rally', finalists });
-      // After rally animation (~700ms), start the shake-and-eliminate sequence
+      playWhoosh();
       const tShake = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'shake3' })), 800);
-      const tElim1 = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'elim1' })), 2200); // shake for 1.4s
+      const tElim1 = setTimeout(() => { setBingoFinale((s) => ({ ...s, phase: 'elim1' })); playExplosion(); }, 2200);
       const tShake2 = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'shake2' })), 3000);
-      const tElim2 = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'elim2' })), 4400); // another 1.4s
-      const tCrown = setTimeout(() => { setBingoFinale((s) => ({ ...s, phase: 'crown' })); setRevealStep('settled'); }, 5300);
+      const tElim2 = setTimeout(() => { setBingoFinale((s) => ({ ...s, phase: 'elim2' })); playExplosion(); }, 4400);
+      const tCrown = setTimeout(() => {
+        setBingoFinale((s) => ({ ...s, phase: 'crown' }));
+        setRevealStep('settled');
+        playThunk();
+        setTimeout(() => (isRollover ? playSad() : playFanfare()), 250);
+      }, 5300);
       revealTimeoutsRef.current.push(tShake, tElim1, tShake2, tElim2, tCrown);
     };
 
@@ -800,7 +920,7 @@ const isAdmin = useMemo(() => {
     revealTimeoutsRef.current.push(first);
   };
 
-  const startTileReveal = (winNum: number) => {
+  const startTileReveal = (winNum: number, isRollover: boolean) => {
     const grid = Array.from({ length: 59 }, (_, i) => ({
       num: i + 1,
       flipped: false,
@@ -822,25 +942,33 @@ const isAdmin = useMemo(() => {
     let i = 0;
     const flipNext = () => {
       if (i >= sequence.length) {
-        // Brief pause after the winner flips so the user can absorb it
-        const t = setTimeout(() => setRevealStep('settled'), 600);
+        const t = setTimeout(() => {
+          setRevealStep('settled');
+          playThunk();
+          setTimeout(() => (isRollover ? playSad() : playFanfare()), 200);
+        }, 600);
         revealTimeoutsRef.current.push(t);
         return;
       }
       const target = sequence[i];
       setTileGrid((prev) => prev.map((tile, idx) => (idx === target ? { ...tile, flipped: true } : tile)));
+      const remaining = sequence.length - i - 1;
+      // Sound: subtle click during fast burn, deeper thuds on the dramatic last few,
+      // and the winner flip is silent (the settle thunk + fanfare are the payoff).
+      if (i === sequence.length - 1) {
+        // winner flip — silence here, settle handles it
+      } else if (remaining < 4) playTone(440 - (4 - remaining) * 60, 90, 0.20, 'sine');
+      else playTick();
       i++;
-      const remaining = sequence.length - i;
-      // Dramatic deceleration on the final 6 flips
       let delay: number;
-      if (remaining === 0) delay = 0;              // already done
-      else if (remaining === 1) delay = 1600;      // pause before final winner flip
+      if (remaining === 0) delay = 0;
+      else if (remaining === 1) delay = 1600;
       else if (remaining === 2) delay = 1100;
       else if (remaining === 3) delay = 800;
       else if (remaining === 4) delay = 550;
       else if (remaining === 5) delay = 350;
       else if (remaining === 6) delay = 200;
-      else delay = 40;                              // fast rip through the middle
+      else delay = 40;
       const t = setTimeout(flipNext, delay);
       revealTimeoutsRef.current.push(t);
     };
@@ -848,12 +976,22 @@ const isAdmin = useMemo(() => {
     revealTimeoutsRef.current.push(first);
   };
 
-  const startCurtainReveal = (_winNum: number) => {
+  const startCurtainReveal = (_winNum: number, isRollover: boolean) => {
     setCurtainPhase('closed');
     const t1 = setTimeout(() => setCurtainPhase('shake'), 200);
-    const t2 = setTimeout(() => setCurtainPhase('opening'), 2400);
-    const t3 = setTimeout(() => { setCurtainPhase('open'); setRevealStep('settled'); }, 4400);
-    revealTimeoutsRef.current.push(t1, t2, t3);
+    // Drum-roll: a series of low taps during the shake phase
+    const drumTimers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 0; i < 12; i++) {
+      drumTimers.push(setTimeout(() => playTone(120, 80, 0.25, 'square'), 300 + i * 180));
+    }
+    const t2 = setTimeout(() => { setCurtainPhase('opening'); playWhoosh(); }, 2400);
+    const t3 = setTimeout(() => {
+      setCurtainPhase('open');
+      setRevealStep('settled');
+      playThunk();
+      setTimeout(() => (isRollover ? playSad() : playFanfare()), 250);
+    }, 4400);
+    revealTimeoutsRef.current.push(t1, t2, t3, ...drumTimers);
   };
 
   const startRevealSequence = (style: RevealStyle = 'slot') => {
@@ -869,10 +1007,11 @@ const isAdmin = useMemo(() => {
     setCurtainPhase('closed');
     // Reset wheel rotation if it was previously animated
     const winNum = latestWin!.ballNumber;
-    if (style === 'slot') startSlotReveal(winNum);
-    else if (style === 'bingo') startBingoReveal(winNum);
-    else if (style === 'tile') startTileReveal(winNum);
-    else if (style === 'curtain') startCurtainReveal(winNum);
+    const isRollover = !!latestWin!.isRollover;
+    if (style === 'slot') startSlotReveal(winNum, isRollover);
+    else if (style === 'bingo') startBingoReveal(winNum, isRollover);
+    else if (style === 'tile') startTileReveal(winNum, isRollover);
+    else if (style === 'curtain') startCurtainReveal(winNum, isRollover);
   };
 
 useEffect(() => {
@@ -1556,15 +1695,42 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             </div>
           )}
 
-          {/* SHARED WINNER NAMEPLATE — appears once settled */}
+          {/* MUTE TOGGLE — top-right of modal, always visible */}
+          <button
+            onClick={toggleMuted}
+            aria-label={muted ? 'Unmute' : 'Mute'}
+            className="absolute top-4 right-4 z-[60] w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all"
+          >
+            {muted ? (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l4-4m0 4l-4-4" /></svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+            )}
+          </button>
+
+          {/* SHARED NAMEPLATE — branches on rollover vs paid winner */}
           <div className={`absolute bottom-[6vh] left-0 w-full text-center transition-all duration-700 delay-300 pointer-events-auto z-[50] ${revealStep === 'settled' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
-            <p className="text-yellow-400 font-black uppercase tracking-[0.5em] text-xs md:text-sm mb-2 animate-pulse">🎉 Congratulations 🎉</p>
-            <p className="text-pink-500 font-black uppercase tracking-[0.5em] text-[10px] mb-3">Saturday Draw Winner</p>
-            <h2 className="text-4xl md:text-7xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">{latestWin?.winner}</h2>
-            <p className="text-yellow-400 font-black text-2xl md:text-5xl tracking-tighter drop-shadow-xl">£{latestWin?.prizeAmount || 0}</p>
-            <div className="mt-6">
-              <button onClick={() => { cancelRevealAnimations(); setShowWinReveal(false); }} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
-            </div>
+            {latestWin?.isRollover ? (
+              <>
+                <p className="text-orange-400 font-black uppercase tracking-[0.5em] text-xs md:text-sm mb-2 animate-pulse">🔥 Rollover Active 🔥</p>
+                <p className="text-pink-500 font-black uppercase tracking-[0.5em] text-[10px] mb-3">Saturday Draw</p>
+                <h2 className="text-4xl md:text-6xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">No Paid Winner</h2>
+                <p className="text-orange-400 font-black text-lg md:text-2xl tracking-tighter">£{latestWin?.rolloverAmount || 0} rolls into next week</p>
+                <div className="mt-6">
+                  <button onClick={() => { cancelRevealAnimations(); setShowWinReveal(false); }} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-yellow-400 font-black uppercase tracking-[0.5em] text-xs md:text-sm mb-2 animate-pulse">🎉 Congratulations 🎉</p>
+                <p className="text-pink-500 font-black uppercase tracking-[0.5em] text-[10px] mb-3">Saturday Draw Winner</p>
+                <h2 className="text-4xl md:text-7xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">{latestWin?.winner}</h2>
+                <p className="text-yellow-400 font-black text-2xl md:text-5xl tracking-tighter drop-shadow-xl">£{latestWin?.prizeAmount || 0}</p>
+                <div className="mt-6">
+                  <button onClick={() => { cancelRevealAnimations(); setShowWinReveal(false); }} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
+                </div>
+              </>
+            )}
           </div>
 
           <style dangerouslySetInnerHTML={{ __html: `
@@ -1762,12 +1928,21 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
                   {/* LATEST DRAW RESULT — hidden until the user has watched the reveal */}
                   {latestWin && hasSeenLatestReveal && (
-                    <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-6 md:p-8 shadow-2xl flex items-center gap-4 md:gap-6">
+                    <div className={`backdrop-blur-xl border rounded-[2.5rem] p-6 md:p-8 shadow-2xl flex items-center gap-4 md:gap-6 ${latestWin.isRollover ? 'bg-orange-500/[0.06] border-orange-500/30' : 'bg-white/[0.03] border-white/10'}`}>
                       <LotteryBall number={latestWin.ballNumber} className="w-20 h-20 md:w-24 md:h-24 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-pink-400 mb-1">Last Draw · {latestWin.date}</p>
-                        <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter truncate">{latestWin.winner}</h4>
-                        <p className="text-yellow-500 font-black text-xl">£{latestWin.prizeAmount}</p>
+                        <p className={`text-[10px] font-black uppercase tracking-[0.3em] mb-1 ${latestWin.isRollover ? 'text-orange-400' : 'text-pink-400'}`}>Last Draw · {latestWin.date}</p>
+                        {latestWin.isRollover ? (
+                          <>
+                            <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter truncate">🔥 Rollover</h4>
+                            <p className="text-orange-400 font-black text-base md:text-lg">£{latestWin.rolloverAmount} carried forward</p>
+                          </>
+                        ) : (
+                          <>
+                            <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter truncate">{latestWin.winner}</h4>
+                            <p className="text-yellow-500 font-black text-xl">£{latestWin.prizeAmount}</p>
+                          </>
+                        )}
                       </div>
                       <button onClick={() => startRevealSequence()} className="hidden sm:block px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:text-white hover:bg-white/10">Replay</button>
                     </div>
