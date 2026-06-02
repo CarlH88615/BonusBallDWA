@@ -89,6 +89,25 @@ const App: React.FC = () => {
   const [paymentWeeks, setPaymentWeeks] = useState('1');
   
   type RevealStyle = 'slot' | 'bingo' | 'tile' | 'curtain';
+  const REVEAL_STYLES: { value: RevealStyle; label: string }[] = [
+    { value: 'slot', label: 'Slot Machine' },
+    { value: 'bingo', label: 'Bingo Eliminate' },
+    { value: 'tile', label: 'Tile Flip' },
+    { value: 'curtain', label: 'Stage Curtain' },
+  ];
+  const [revealDefaultStyle, setRevealDefaultStyle] = useState<RevealStyle>(() => {
+    if (typeof window === 'undefined') return 'slot';
+    const saved = localStorage.getItem('reveal_default_style');
+    if (saved === 'slot' || saved === 'bingo' || saved === 'tile' || saved === 'curtain') return saved;
+    return 'slot';
+  });
+  const setAsDefaultStyle = (style: RevealStyle) => {
+    localStorage.setItem('reveal_default_style', style);
+    setRevealDefaultStyle(style);
+    showToast('success', `Default reveal set to ${REVEAL_STYLES.find((s) => s.value === style)?.label}`);
+  };
+  // Per-draw override chosen in the Record Result modal. Empty string = use default.
+  const [recordRevealStyle, setRecordRevealStyle] = useState<RevealStyle | ''>('');
   const [revealStyle, setRevealStyle] = useState<RevealStyle>('slot');
   const [revealStep, setRevealStep] = useState<'idle' | 'running' | 'settled'>('idle');
   // Per-style state. Each style only reads what it needs.
@@ -550,6 +569,11 @@ const isAdmin = useMemo(() => {
     // still plays and the home card still updates after every draw, not just paid ones.
     const completed = (winnerRows ?? []).find((r: any) => r.winning_number);
     if (!completed) return null;
+    const persistedStyle = (completed.reveal_style as RevealStyle | undefined) ?? null;
+    const styleForPlayback: RevealStyle =
+      persistedStyle === 'slot' || persistedStyle === 'bingo' || persistedStyle === 'tile' || persistedStyle === 'curtain'
+        ? persistedStyle
+        : revealDefaultStyle;
     return {
       id: completed.id,
       date: completed.draw_date,
@@ -559,8 +583,9 @@ const isAdmin = useMemo(() => {
       charityAmount: 0,
       rolloverAmount: Number(completed.rollover_amount) || 0,
       isRollover: !completed.winner_name,
+      revealStyle: styleForPlayback,
     };
-  }, [winnerRows]);
+  }, [winnerRows, revealDefaultStyle]);
   const handleRecordResult = async () => {
     if (!selectedResultBall) return;
     const ball = balls.find(b => b.number === selectedResultBall);
@@ -601,23 +626,37 @@ const isAdmin = useMemo(() => {
       const nextDrawDateStr = `${nextLocal.getFullYear()}-${String(nextLocal.getMonth() + 1).padStart(2, '0')}-${String(nextLocal.getDate()).padStart(2, '0')}`;
       const nextDrawTimestampIso = nextLocal.toISOString();
 
-      // Update open row to completed
-      const { error: updateErr } = await supabase
+      // Update open row to completed. reveal_style is the override (or default).
+      const chosenStyle: RevealStyle = (recordRevealStyle as RevealStyle) || revealDefaultStyle;
+      const updatePayload: Record<string, any> = {
+        status: "completed",
+        winning_number: selectedResultBall,
+        winner_name: winnerName,
+        amount_won: amountWon,
+        rollover_amount: rolloverPersist,
+        completed_at: new Date().toISOString(),
+        reveal_style: chosenStyle,
+      };
+      let { error: updateErr } = await supabase
         .from("bonus_ball_winners")
-        .update({
-          status: "completed",
-          winning_number: selectedResultBall,
-          winner_name: winnerName,
-          amount_won: amountWon,
-          rollover_amount: rolloverPersist,
-          completed_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq("id", openRow.id);
+      // Graceful fallback if the reveal_style column hasn't been added yet to Supabase.
+      if (updateErr && /reveal_style/i.test(updateErr.message || '')) {
+        console.warn("reveal_style column missing — retrying without it. Run the SQL in admin to enable per-draw styles.");
+        delete updatePayload.reveal_style;
+        const retry = await supabase
+          .from("bonus_ball_winners")
+          .update(updatePayload)
+          .eq("id", openRow.id);
+        updateErr = retry.error;
+      }
       if (updateErr) {
         console.error("❌ Failed to record winner", updateErr);
         return;
       }
       console.log("✅ Winner recorded");
+      setRecordRevealStyle(''); // reset for next time
 
       // Insert next open row
       const { error: newOpenErr } = await supabase
@@ -801,7 +840,7 @@ const isAdmin = useMemo(() => {
     if (!latestWin || !(latestWin as any).id) return;
     const key = 'seen_reveal_id_' + (latestWin as any).id;
     if (localStorage.getItem(key) === 'true') return;
-    startRevealSequence();
+    startRevealSequence(latestWin.revealStyle);
     localStorage.setItem(key, 'true');
   };
 
@@ -1944,7 +1983,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           </>
                         )}
                       </div>
-                      <button onClick={() => startRevealSequence()} className="hidden sm:block px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:text-white hover:bg-white/10">Replay</button>
+                      <button onClick={() => startRevealSequence(latestWin?.revealStyle)} className="hidden sm:block px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:text-white hover:bg-white/10">Replay</button>
                     </div>
                   )}
 
@@ -2075,7 +2114,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                               </div>
                               {i === 0 && r.winner_name && (
                                 <button
-                                  onClick={() => startRevealSequence()}
+                                  onClick={() => startRevealSequence(latestWin?.revealStyle)}
                                   title="Replay reveal"
                                   className="w-10 h-10 rounded-full bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 flex items-center justify-center flex-shrink-0"
                                 >
@@ -2208,28 +2247,39 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
                       <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 md:p-10 shadow-2xl">
                         <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Reveal Lab</h4>
-                        <p className="text-[11px] text-white/40 mb-6">Preview each animation style. Pick one and I'll wire it as the default.</p>
+                        <p className="text-[11px] text-white/40 mb-6">Preview each style and set your default. The Record Result modal lets you override per draw.</p>
                         {!latestWin && (
                           <p className="text-xs text-white/50 italic">No latest winner to preview — record a draw first.</p>
                         )}
                         {latestWin && (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                            <button onClick={() => startRevealSequence('slot')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
-                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Slot Machine</span>
-                              <span className="text-[10px] text-white/50">Huge number cycles fast, slows with a thunk</span>
-                            </button>
-                            <button onClick={() => startRevealSequence('bingo')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
-                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Bingo Eliminate</span>
-                              <span className="text-[10px] text-white/50">All 59 balls, eliminated until one remains</span>
-                            </button>
-                            <button onClick={() => startRevealSequence('tile')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
-                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Tile Flip</span>
-                              <span className="text-[10px] text-white/50">"?" tiles sweep-flip, winner glows last</span>
-                            </button>
-                            <button onClick={() => startRevealSequence('curtain')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
-                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Stage Curtain</span>
-                              <span className="text-[10px] text-white/50">Red curtains shake, then part dramatically</span>
-                            </button>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {[
+                              { value: 'slot' as RevealStyle, title: 'Slot Machine', desc: 'Huge number cycles fast, slows with a thunk' },
+                              { value: 'bingo' as RevealStyle, title: 'Bingo Eliminate', desc: 'All 59 balls, eliminated until three remain in a final showdown' },
+                              { value: 'tile' as RevealStyle, title: 'Tile Flip', desc: '"?" tiles sweep-flip, winner glows last' },
+                              { value: 'curtain' as RevealStyle, title: 'Stage Curtain', desc: 'Red curtains shake, then part dramatically' },
+                            ].map((opt) => {
+                              const isDefault = revealDefaultStyle === opt.value;
+                              return (
+                                <div key={opt.value} className={`p-4 rounded-2xl border transition-all ${isDefault ? 'bg-pink-500/10 border-pink-500/40' : 'bg-white/5 border-white/10'}`}>
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-black uppercase tracking-widest text-pink-400">{opt.title}</span>
+                                    {isDefault && <span className="text-[9px] font-black uppercase tracking-widest text-pink-300 px-2 py-0.5 bg-pink-500/20 rounded-full">Default</span>}
+                                  </div>
+                                  <p className="text-[10px] text-white/50 mb-3">{opt.desc}</p>
+                                  <div className="flex gap-2">
+                                    <button onClick={() => startRevealSequence(opt.value)} className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/80 hover:text-white hover:bg-white/10">Preview</button>
+                                    <button
+                                      onClick={() => setAsDefaultStyle(opt.value)}
+                                      disabled={isDefault}
+                                      className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDefault ? 'bg-white/5 border border-white/10 text-white/30 cursor-default' : 'bg-pink-500 text-black hover:bg-pink-400'}`}
+                                    >
+                                      {isDefault ? 'Default' : 'Set Default'}
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -2398,6 +2448,19 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                               <option key={b.number} value={b.number}>{b.number} {b.owner ? `- ${b.owner}` : '- Vacant'}</option>
                             ))}
                           </select>
+                          <div>
+                            <label className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1 block">Reveal style</label>
+                            <select
+                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-sm"
+                              value={recordRevealStyle}
+                              onChange={(e) => setRecordRevealStyle(e.target.value as RevealStyle | '')}
+                            >
+                              <option value="">Use default ({REVEAL_STYLES.find((s) => s.value === revealDefaultStyle)?.label})</option>
+                              {REVEAL_STYLES.map((s) => (
+                                <option key={s.value} value={s.value}>{s.label}</option>
+                              ))}
+                            </select>
+                          </div>
                           <button
                             onClick={handleRecordResult}
                             className="w-full py-4 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-xl"
