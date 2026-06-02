@@ -95,6 +95,10 @@ const App: React.FC = () => {
   const revealRef = useRef<BallState[]>([]);
   const spotlightRef = useRef({ x: 0, y: 0 });
   const revealRequestRef = useRef<number>(null);
+  // Refs to the rendered ball elements + spotlight so the animation loop can write
+  // transforms directly without re-rendering React on every frame.
+  const ballElRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const spotlightElRef = useRef<HTMLDivElement | null>(null);
 
   const [smallBalls, setSmallBalls] = useState<BallState[]>([]);
   const [selectedBallNum, setSelectedBallNum] = useState<number | null>(null);
@@ -436,6 +440,7 @@ const isAdmin = useMemo(() => {
     const completed = (winnerRows ?? []).find((r: any) => r.winning_number && r.winner_name);
     if (!completed) return null;
     return {
+      id: completed.id, // stable key for the "seen-this-reveal" localStorage flag
       date: completed.draw_date,
       ballNumber: Number(completed.winning_number),
       winner: completed.winner_name,
@@ -677,29 +682,33 @@ const isAdmin = useMemo(() => {
 };
 
 
+  // Auto-plays the reveal once per paid draw the user hasn't watched yet. Keyed by the
+  // draw row id (stable) rather than a computed date string.
   const checkReveal = () => {
-    const now = new Date();
-    const day = now.getDay();
-    const hrs = now.getHours();
-    const mins = now.getMinutes();
-
-    let lastDrawSat = new Date(now);
-    const diff = (day + 1) % 7;
-    lastDrawSat.setDate(now.getDate() - diff);
-    lastDrawSat.setHours(20, 10, 0, 0);
-
-    if (day === 6 && (hrs < 20 || (hrs === 20 && mins < 10))) {
-      lastDrawSat.setDate(lastDrawSat.getDate() - 7);
-    }
-
-    const drawId = lastDrawSat.toDateString();
-    const seenDrawId = localStorage.getItem('seen_reveal_' + drawId);
-
-    if (!seenDrawId) {
-      startRevealSequence();
-      localStorage.setItem('seen_reveal_' + drawId, 'true');
-    }
+    if (!latestWin || !(latestWin as any).id) return;
+    const key = 'seen_reveal_id_' + (latestWin as any).id;
+    if (localStorage.getItem(key) === 'true') return;
+    startRevealSequence();
+    localStorage.setItem(key, 'true');
   };
+
+  // Whether the user has watched the reveal for the latest paid draw. Drives whether
+  // the home-page winner card is shown (hidden = avoid spoilers before the reveal plays).
+  const hasSeenLatestReveal = useMemo(() => {
+    if (!latestWin || !(latestWin as any).id) return true;
+    if (typeof window === 'undefined') return true;
+    return localStorage.getItem('seen_reveal_id_' + (latestWin as any).id) === 'true';
+  }, [latestWin, showWinReveal]);
+
+  // Auto-play the reveal the first time latestWin becomes available after a draw.
+  // Fires on every page load (not just login) so a user who already had the app open
+  // when the result was recorded will see it next time they return.
+  useEffect(() => {
+    if (latestWin && (latestWin as any).id && !hasSeenLatestReveal && !showWinReveal) {
+      const t = setTimeout(() => checkReveal(), 400); // small delay so the home tab paints first
+      return () => clearTimeout(t);
+    }
+  }, [latestWin, hasSeenLatestReveal]);
 
   const startRevealSequence = () => {
     if (!latestWin) return;
@@ -707,67 +716,121 @@ const isAdmin = useMemo(() => {
     setRevealStep('searching');
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const ballRadius = w < 768 ? 45 : 70;
+    const ballRadius = w < 768 ? 38 : 60;
     const colorStarters = [5, 15, 25, 35, 45, 55];
     const initialBalls: BallState[] = colorStarters.map((num, i) => {
       const winNum = latestWin!.ballNumber;
-      const isWinner = (num >= Math.floor(winNum/10)*10 && num < Math.ceil(winNum/10)*10) || (winNum < 10 && num < 10);
+      const isWinner = (num >= Math.floor(winNum / 10) * 10 && num < Math.ceil(winNum / 10) * 10) || (winNum < 10 && num < 10);
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 4 + Math.random() * 4;
       return {
         id: i,
         num: isWinner ? winNum : num,
         x: Math.random() * (w - 200) + 100,
         y: Math.random() * (h - 200) + 100,
-        vx: (Math.random() - 0.5) * 20,
-        vy: (Math.random() - 0.5) * 20,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
         radius: ballRadius,
-        isWinner
+        isWinner,
       };
     });
     revealRef.current = initialBalls;
     spotlightRef.current = { x: w / 2, y: h / 2 };
-    
-    let sequenceStartTime = Date.now();
+    setRevealBalls(initialBalls); // single render to mount DOM nodes; loop updates via refs
+
+    const SEARCH_MS = 1800;
+    const TRACK_MS = 1500;
+    const SUSPENSE_MS = 1300;
+    const SEARCH_END = SEARCH_MS;
+    const TRACK_END = SEARCH_END + TRACK_MS;
+    const SUSPENSE_END = TRACK_END + SUSPENSE_MS;
+
+    let phase: 'searching' | 'tracking' | 'suspense' | 'homing' = 'searching';
+    const sequenceStartTime = performance.now();
     let searchTargetChangeTime = 0;
     let currentSearchTarget = { x: w / 2, y: h / 2 };
+    const targetXCenter = w / 2;
+    const targetYCenter = h * 0.42;
+    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 
-    const loop = () => {
-      const now = Date.now();
-      const elapsed = now - sequenceStartTime;
-      const targetXCenter = w / 2;
-      const targetYCenter = h * 0.4;
+    const writeTransforms = () => {
       const balls = revealRef.current;
-      const winningBall = balls.find(b => b.isWinner)!;
-      const isHoming = elapsed >= 6000;
+      for (let i = 0; i < balls.length; i++) {
+        const el = ballElRefs.current[i];
+        if (!el) continue;
+        const b = balls[i];
+        const isWinnerNow = b.isWinner;
+        const fadeOthers = phase === 'suspense' || phase === 'homing';
+        const isSettled = phase === 'homing' && Math.abs(b.x - targetXCenter) < 1 && Math.abs(b.y - targetYCenter) < 1;
+        const scale = isWinnerNow && phase === 'homing' ? (isSettled ? 2.5 : 1.4) : isWinnerNow && phase === 'suspense' ? 1.15 : 1;
+        const opacity = !isWinnerNow && fadeOthers ? (phase === 'homing' ? 0 : 0.25) : 1;
+        el.style.transform = `translate3d(${b.x - b.radius}px, ${b.y - b.radius}px, 0) scale(${scale})`;
+        el.style.opacity = String(opacity);
+      }
+      const spotEl = spotlightElRef.current;
+      if (spotEl) {
+        const s = spotlightRef.current;
+        spotEl.style.background = `radial-gradient(circle 280px at ${s.x}px ${s.y}px, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.1) 40%, transparent 100%)`;
+      }
+    };
 
+    const loop = (now: number) => {
+      const elapsed = now - sequenceStartTime;
+      const balls = revealRef.current;
+      const winningBall = balls.find((b) => b.isWinner)!;
+
+      // Physics: bounce all balls except during homing for the winner
+      const damping = phase === 'suspense' ? 0.985 : 1;
       for (let i = 0; i < balls.length; i++) {
         const b = balls[i];
-        if (isHoming && b.isWinner) continue;
-        b.x += b.vx; b.y += b.vy;
-        if (b.x < b.radius || b.x > w - b.radius) { b.vx *= -0.9; b.x = b.x < b.radius ? b.radius : w - b.radius; }
-        if (b.y < b.radius || b.y > h - b.radius) { b.vy *= -0.9; b.y = b.y < b.radius ? b.radius : h - b.radius; }
+        if (phase === 'homing' && b.isWinner) continue;
+        b.vx *= damping;
+        b.vy *= damping;
+        b.x += b.vx;
+        b.y += b.vy;
+        if (b.x < b.radius) { b.vx = Math.abs(b.vx); b.x = b.radius; }
+        else if (b.x > w - b.radius) { b.vx = -Math.abs(b.vx); b.x = w - b.radius; }
+        if (b.y < b.radius) { b.vy = Math.abs(b.vy); b.y = b.radius; }
+        else if (b.y > h - b.radius) { b.vy = -Math.abs(b.vy); b.y = h - b.radius; }
       }
 
-      if (elapsed < 3000) {
-        if (now > searchTargetChangeTime) { currentSearchTarget = { x: Math.random() * w, y: Math.random() * h }; searchTargetChangeTime = now + 600; }
-        spotlightRef.current.x += (currentSearchTarget.x - spotlightRef.current.x) * 0.08;
-        spotlightRef.current.y += (currentSearchTarget.y - spotlightRef.current.y) * 0.08;
-      } else if (elapsed < 6000) {
-        if (revealStep !== 'tracking') setRevealStep('tracking');
-        spotlightRef.current.x += (winningBall.x - spotlightRef.current.x) * 0.12;
-        spotlightRef.current.y += (winningBall.y - spotlightRef.current.y) * 0.12;
+      // Spotlight + phase logic
+      if (elapsed < SEARCH_END) {
+        if (now > searchTargetChangeTime) {
+          currentSearchTarget = { x: 100 + Math.random() * (w - 200), y: 100 + Math.random() * (h - 200) };
+          searchTargetChangeTime = now + 450;
+        }
+        spotlightRef.current.x += (currentSearchTarget.x - spotlightRef.current.x) * 0.10;
+        spotlightRef.current.y += (currentSearchTarget.y - spotlightRef.current.y) * 0.10;
+      } else if (elapsed < TRACK_END) {
+        if (phase !== 'tracking') { phase = 'tracking'; setRevealStep('tracking'); }
+        spotlightRef.current.x += (winningBall.x - spotlightRef.current.x) * 0.14;
+        spotlightRef.current.y += (winningBall.y - spotlightRef.current.y) * 0.14;
+      } else if (elapsed < SUSPENSE_END) {
+        if (phase !== 'suspense') { phase = 'suspense'; setRevealStep('homing'); /* reuse homing step for CSS */ }
+        spotlightRef.current.x += (winningBall.x - spotlightRef.current.x) * 0.2;
+        spotlightRef.current.y += (winningBall.y - spotlightRef.current.y) * 0.2;
       } else {
-        if (revealStep !== 'homing') setRevealStep('homing');
-        winningBall.x += (targetXCenter - winningBall.x) * 0.15;
-        winningBall.y += (targetYCenter - winningBall.y) * 0.15;
-        spotlightRef.current.x += (winningBall.x - spotlightRef.current.x) * 0.25;
-        if (Math.abs(winningBall.x - targetXCenter) < 2) {
-          winningBall.x = targetXCenter; winningBall.y = targetYCenter;
-          setRevealBalls([...balls]); setRevealStep('settled');
+        if (phase !== 'homing') { phase = 'homing'; setRevealStep('homing'); }
+        const homingElapsed = elapsed - SUSPENSE_END;
+        const homingDuration = 1200;
+        const t = Math.min(1, homingElapsed / homingDuration);
+        const ease = easeOutCubic(t);
+        winningBall.x = winningBall.x + (targetXCenter - winningBall.x) * ease * 0.18;
+        winningBall.y = winningBall.y + (targetYCenter - winningBall.y) * ease * 0.18;
+        spotlightRef.current.x += (winningBall.x - spotlightRef.current.x) * 0.3;
+        spotlightRef.current.y += (winningBall.y - spotlightRef.current.y) * 0.3;
+        if (t >= 1 && Math.abs(winningBall.x - targetXCenter) < 1.5 && Math.abs(winningBall.y - targetYCenter) < 1.5) {
+          winningBall.x = targetXCenter;
+          winningBall.y = targetYCenter;
+          writeTransforms();
+          setRevealStep('settled');
           cancelAnimationFrame(revealRequestRef.current!);
           return;
         }
       }
-      setRevealBalls([...balls]); setSpotlightPos({ ...spotlightRef.current });
+
+      writeTransforms();
       revealRequestRef.current = requestAnimationFrame(loop);
     };
     revealRequestRef.current = requestAnimationFrame(loop);
@@ -1258,11 +1321,21 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       {/* WIN REVEAL */}
       {showWinReveal && (
         <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-black overflow-hidden">
-          <div className={`absolute inset-0 pointer-events-none transition-opacity duration-1000 ${revealStep === 'settled' ? 'opacity-0' : 'opacity-100'}`} style={{ background: `radial-gradient(circle 280px at ${spotlightPos.x}px ${spotlightPos.y}px, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.1) 40%, transparent 100%)` }} />
+          <div ref={spotlightElRef} className={`absolute inset-0 pointer-events-none transition-opacity duration-1000 ${revealStep === 'settled' ? 'opacity-0' : 'opacity-100'}`} />
           <div className="relative w-full h-full pointer-events-none">
-            {revealBalls.map(ball => (
-              <div key={ball.id} className={`absolute transition-all ${ball.isWinner && revealStep === 'settled' ? 'duration-1000' : 'duration-0'} ease-out`} style={{ left: ball.x, top: ball.y, transform: `translate(-50%, -50%) ${ball.isWinner && revealStep === 'settled' ? 'scale(2.5)' : 'scale(1)'}`, opacity: revealStep === 'settled' && !ball.isWinner ? 0 : 1, zIndex: ball.isWinner ? 10 : 1 }}>
-                <LotteryBall number={ball.num} hideShadow={true} showNumber={ball.isWinner && revealStep === 'settled'} className={`w-28 h-28 md:w-40 md:h-40 ${ball.isWinner && revealStep === 'settled' ? 'animate-pulse-win' : ''}`} />
+            {revealBalls.map((ball, idx) => (
+              <div
+                key={ball.id}
+                ref={(el) => { ballElRefs.current[idx] = el; }}
+                className={`absolute top-0 left-0 ${ball.isWinner && revealStep === 'settled' ? 'transition-transform duration-700 ease-out' : ''}`}
+                style={{ width: ball.radius * 2, height: ball.radius * 2, willChange: 'transform, opacity', zIndex: ball.isWinner ? 10 : 1 }}
+              >
+                <LotteryBall
+                  number={ball.num}
+                  hideShadow={true}
+                  showNumber={ball.isWinner && revealStep === 'settled'}
+                  className={`w-full h-full ${ball.isWinner && revealStep === 'settled' ? 'animate-pulse-win' : ''}`}
+                />
               </div>
             ))}
             <div className={`absolute bottom-[12vh] left-0 w-full text-center transition-all duration-1000 delay-500 pointer-events-auto z-[50] ${revealStep === 'settled' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-20'}`}>
@@ -1435,15 +1508,16 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     </div>
                   )}
 
-                  {/* LATEST DRAW RESULT */}
-                  {latestWin && (
-                    <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-6 md:p-8 shadow-2xl flex items-center gap-6">
+                  {/* LATEST DRAW RESULT — hidden until the user has watched the reveal */}
+                  {latestWin && hasSeenLatestReveal && (
+                    <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-6 md:p-8 shadow-2xl flex items-center gap-4 md:gap-6">
                       <LotteryBall number={latestWin.ballNumber} className="w-20 h-20 md:w-24 md:h-24 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-[10px] font-black uppercase tracking-[0.3em] text-pink-400 mb-1">Last Draw · {latestWin.date}</p>
                         <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter truncate">{latestWin.winner}</h4>
                         <p className="text-yellow-500 font-black text-xl">£{latestWin.prizeAmount}</p>
                       </div>
+                      <button onClick={() => startRevealSequence()} className="hidden sm:block px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:text-white hover:bg-white/10">Replay</button>
                     </div>
                   )}
 
