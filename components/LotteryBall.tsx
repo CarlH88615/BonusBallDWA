@@ -62,18 +62,26 @@ export const LotteryBall: React.FC<BallProps> = ({
         {/* Specular Shine Overlay */}
         <div className="absolute top-[10%] left-[15%] w-[40%] h-[30%] bg-gradient-to-br from-white/40 to-transparent rounded-full blur-[2px] rotate-[-15deg]"></div>
 
-        {/* The Number Plate (SVG so the digits always scale with the ball size). */}
-        <div className={`relative z-10 flex items-center justify-center w-[75%] h-[75%] rounded-full bg-white/5 border border-black/5 shadow-inner transition-opacity duration-1000 ${showNumber ? 'opacity-100' : 'opacity-0'}`}>
-          <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible">
+        {/* The Number Plate (SVG so the digits always scale with the ball size).
+            Plate is 85% of the ball, digit ~64% of plate — readable on tiny grid balls
+            and properly enormous on giant reveal balls. */}
+        <div className={`relative z-10 flex items-center justify-center w-[85%] h-[85%] rounded-full bg-white/5 border border-black/5 shadow-inner transition-opacity duration-1000 ${showNumber ? 'opacity-100' : 'opacity-0'}`}>
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="xMidYMid meet"
+            width="100%"
+            height="100%"
+            className="block"
+          >
             <text
               x="50"
               y="50"
+              dy=".35em"
               textAnchor="middle"
-              dominantBaseline="central"
-              fontSize="56"
+              fontSize="64"
               fontWeight="900"
               fill={styles.text}
-              style={{ letterSpacing: '-0.05em', fontFamily: 'inherit' }}
+              style={{ fontFamily: 'inherit', letterSpacing: '-0.05em' }}
             >
               {displayNum}
             </text>

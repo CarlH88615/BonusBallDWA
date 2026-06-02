@@ -88,7 +88,7 @@ const App: React.FC = () => {
   const [resultBallNum, setResultBallNum] = useState('');
   const [paymentWeeks, setPaymentWeeks] = useState('1');
   
-  type RevealStyle = 'slot' | 'bingo' | 'wheel' | 'tile' | 'curtain';
+  type RevealStyle = 'slot' | 'bingo' | 'tile' | 'curtain';
   const [revealStyle, setRevealStyle] = useState<RevealStyle>('slot');
   const [revealStep, setRevealStep] = useState<'idle' | 'running' | 'settled'>('idle');
   // Per-style state. Each style only reads what it needs.
@@ -102,8 +102,6 @@ const App: React.FC = () => {
   const [curtainPhase, setCurtainPhase] = useState<'closed' | 'shake' | 'opening' | 'open'>('closed');
   const revealRequestRef = useRef<number>(null);
   const revealTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  // Refs for direct DOM writes (wheel needs smooth 60fps rotation).
-  const wheelElRef = useRef<HTMLDivElement | null>(null);
 
   const [smallBalls, setSmallBalls] = useState<BallState[]>([]);
   const [selectedBallNum, setSelectedBallNum] = useState<number | null>(null);
@@ -802,32 +800,6 @@ const isAdmin = useMemo(() => {
     revealTimeoutsRef.current.push(first);
   };
 
-  const startWheelReveal = (winNum: number) => {
-    // Each segment = 360/59 degrees. Pointer is at top (0deg). We want segment N's centre
-    // to land at -90deg (top). Total rotation = many spins + offset to winner.
-    const segDeg = 360 / 59;
-    const winnerCentre = (winNum - 1) * segDeg + segDeg / 2; // angle from origin of segment centre
-    const targetRotation = 360 * 7 - winnerCentre; // 7 spins then land
-    const duration = 6200;
-    const start = performance.now();
-    const easeOutQuart = (t: number) => 1 - Math.pow(1 - t, 4);
-    const loop = (now: number) => {
-      const elapsed = now - start;
-      const t = Math.min(1, elapsed / duration);
-      const angle = targetRotation * easeOutQuart(t);
-      if (wheelElRef.current) {
-        wheelElRef.current.style.transform = `rotate(${angle}deg)`;
-      }
-      if (t < 1) {
-        revealRequestRef.current = requestAnimationFrame(loop);
-      } else {
-        revealRequestRef.current = null;
-        setRevealStep('settled');
-      }
-    };
-    revealRequestRef.current = requestAnimationFrame(loop);
-  };
-
   const startTileReveal = (winNum: number) => {
     const grid = Array.from({ length: 59 }, (_, i) => ({
       num: i + 1,
@@ -896,11 +868,9 @@ const isAdmin = useMemo(() => {
     setTileGrid([]);
     setCurtainPhase('closed');
     // Reset wheel rotation if it was previously animated
-    if (wheelElRef.current) wheelElRef.current.style.transform = 'rotate(0deg)';
     const winNum = latestWin!.ballNumber;
     if (style === 'slot') startSlotReveal(winNum);
     else if (style === 'bingo') startBingoReveal(winNum);
-    else if (style === 'wheel') startWheelReveal(winNum);
     else if (style === 'tile') startTileReveal(winNum);
     else if (style === 'curtain') startCurtainReveal(winNum);
   };
@@ -1394,14 +1364,19 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
           {/* SLOT MACHINE — single big number cycling */}
           {revealStyle === 'slot' && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-8 animate-pulse">Drawing</p>
-                <div className={`mx-auto inline-block transition-transform duration-500 ${revealStep === 'settled' ? 'scale-125 drop-shadow-[0_0_120px_rgba(250,204,21,0.6)]' : 'scale-100'}`}>
-                  <LotteryBall number={slotNumber} hideShadow={false} showNumber={true} className="w-[260px] h-[260px] md:w-[400px] md:h-[400px]" />
-                </div>
+              <div className="relative text-center">
+                <p className={`text-[11px] font-black uppercase tracking-[0.5em] mb-8 transition-colors ${revealStep === 'settled' ? 'text-yellow-400' : 'text-pink-500 animate-pulse'}`}>
+                  {revealStep === 'settled' ? '★ LOCKED IN ★' : 'Drawing'}
+                </p>
+                {/* Radiating rays behind the ball on settle */}
                 {revealStep === 'settled' && (
-                  <p className="mt-6 text-yellow-400 font-black uppercase tracking-[0.4em] text-sm animate-pulse">Locked in</p>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-[120%] h-[120%] rounded-full animate-slot-rays" style={{ background: 'conic-gradient(from 0deg, transparent 0deg, rgba(250,204,21,0.25) 10deg, transparent 30deg, transparent 60deg, rgba(250,204,21,0.25) 70deg, transparent 90deg, transparent 120deg, rgba(250,204,21,0.25) 130deg, transparent 150deg, transparent 180deg, rgba(250,204,21,0.25) 190deg, transparent 210deg, transparent 240deg, rgba(250,204,21,0.25) 250deg, transparent 270deg, transparent 300deg, rgba(250,204,21,0.25) 310deg, transparent 330deg, transparent 360deg)' }} />
+                  </div>
                 )}
+                <div className={`mx-auto inline-block relative transition-transform duration-700 ease-out ${revealStep === 'settled' ? 'scale-[1.4] drop-shadow-[0_0_140px_rgba(250,204,21,0.7)]' : 'scale-100'}`}>
+                  <LotteryBall number={slotNumber} hideShadow={false} showNumber={true} className="w-[260px] h-[260px] md:w-[420px] md:h-[420px]" />
+                </div>
               </div>
             </div>
           )}
@@ -1428,66 +1403,36 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 </>
               ) : (
                 <>
-                  <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-6 md:mb-10">Final Three</p>
-                  <div className="flex items-center justify-center gap-6 md:gap-14 transition-all duration-700">
+                  {/* Big "FINAL 3" text that fades when we move to crowning */}
+                  <p className={`font-black uppercase tracking-[0.4em] mb-6 md:mb-12 transition-all duration-500 ${bingoFinale.phase === 'crown' ? 'opacity-0 text-yellow-400 text-2xl' : bingoFinale.phase === 'rally' ? 'text-pink-500 text-2xl md:text-4xl animate-pulse scale-110' : 'text-pink-500 text-xl md:text-3xl'}`}>
+                    {bingoFinale.phase === 'rally' ? '⚡ FINAL THREE ⚡' : bingoFinale.phase === 'shake3' ? 'Who Will It Be?' : bingoFinale.phase === 'elim1' || bingoFinale.phase === 'shake2' ? 'Down to Two…' : bingoFinale.phase === 'elim2' ? 'One Remains…' : ''}
+                  </p>
+                  <div className="flex items-center justify-center gap-6 md:gap-16 transition-all duration-700">
                     {bingoFinale.finalists.map((num, idx) => {
                       const isWinner = num === latestWin?.ballNumber;
                       const phase = bingoFinale.phase;
-                      // idx 0 = loser1, idx 1 = loser2, idx 2 = winner
                       const explodedOut = (idx === 0 && (phase === 'elim1' || phase === 'shake2' || phase === 'elim2' || phase === 'crown'))
                         || (idx === 1 && (phase === 'elim2' || phase === 'crown'));
                       const shaking =
                         (phase === 'shake3') ||
                         (phase === 'shake2' && idx !== 0);
                       const crowned = phase === 'crown' && isWinner;
+                      // Mid-explosion: pulse red just before exploding out
+                      const flashing =
+                        (idx === 0 && phase === 'elim1') ||
+                        (idx === 1 && phase === 'elim2');
                       return (
                         <div
                           key={`${num}-${idx}`}
-                          className={`relative transition-all duration-700 ease-out ${
-                            explodedOut ? 'opacity-0 scale-0 rotate-[720deg]' : crowned ? 'scale-150 drop-shadow-[0_0_60px_rgba(250,204,21,0.9)]' : 'opacity-100 scale-100'
-                          } ${shaking ? 'animate-finalist-shake' : ''}`}
+                          className={`relative transition-all ease-out ${explodedOut ? 'duration-500 opacity-0 scale-0 rotate-[720deg]' : crowned ? 'duration-1000 scale-[1.8] drop-shadow-[0_0_100px_rgba(250,204,21,0.95)]' : 'duration-300 opacity-100 scale-100'} ${shaking ? 'animate-finalist-shake' : ''} ${flashing ? 'animate-finalist-flash' : ''}`}
                         >
-                          <LotteryBall number={num} showNumber={true} className="w-28 h-28 md:w-44 md:h-44" />
+                          <LotteryBall number={num} showNumber={true} className="w-36 h-36 md:w-56 md:h-56" />
                         </div>
                       );
                     })}
                   </div>
                 </>
               )}
-            </div>
-          )}
-
-          {/* WHEEL OF FORTUNE — spinning wheel with bonus balls around the edge */}
-          {revealStyle === 'wheel' && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="relative w-[92vmin] h-[92vmin] max-w-[760px] max-h-[760px]">
-                {/* pointer */}
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-3 w-0 h-0 border-l-[20px] border-r-[20px] border-t-[34px] border-l-transparent border-r-transparent border-t-yellow-400 z-30 drop-shadow-[0_4px_12px_rgba(0,0,0,0.6)]" />
-                {/* wheel */}
-                <div ref={wheelElRef} className="absolute inset-0 rounded-full border-[6px] border-yellow-400/40 shadow-[0_0_80px_rgba(236,72,153,0.4),inset_0_0_60px_rgba(0,0,0,0.5)]" style={{ background: 'conic-gradient(from -90deg, #ec4899, #f97316, #facc15, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899)' }}>
-                  {Array.from({ length: 59 }, (_, i) => {
-                    // Each ball positioned around the wheel edge. -90deg so first ball is at top.
-                    const angleDeg = (i * 360) / 59 - 90;
-                    const angleRad = (angleDeg * Math.PI) / 180;
-                    const r = 44; // % — pushed slightly outward so balls don't overlap
-                    const x = 50 + r * Math.cos(angleRad);
-                    const y = 50 + r * Math.sin(angleRad);
-                    return (
-                      <div
-                        key={i}
-                        className="absolute"
-                        style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
-                      >
-                        <LotteryBall number={i + 1} showNumber={true} hideShadow={true} className="w-5 h-5 md:w-8 md:h-8" />
-                      </div>
-                    );
-                  })}
-                  {/* inner hub */}
-                  <div className="absolute inset-[34%] rounded-full bg-gradient-to-br from-neutral-800 to-black flex items-center justify-center border-4 border-yellow-400/60 shadow-[inset_0_0_30px_rgba(0,0,0,0.8)]">
-                    <span className="text-yellow-400 font-black uppercase tracking-[0.3em] text-xs md:text-base">Draw</span>
-                  </div>
-                </div>
-              </div>
             </div>
           )}
 
@@ -1499,8 +1444,10 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 {tileGrid.map((tile) => {
                   const isWinner = tile.num === latestWin?.ballNumber;
                   const showFace = tile.flipped;
+                  // Winner card grows dramatically once the reveal settles
+                  const winnerSettled = isWinner && showFace && revealStep === 'settled';
                   return (
-                    <div key={tile.num} className="relative aspect-square" style={{ perspective: '800px' }}>
+                    <div key={tile.num} className={`relative aspect-square transition-all duration-700 ease-out ${winnerSettled ? 'scale-[2.4] z-20 drop-shadow-[0_0_60px_rgba(250,204,21,0.9)]' : 'scale-100'}`} style={{ perspective: '800px' }}>
                       <div
                         className="absolute inset-0 transition-transform duration-500 ease-out"
                         style={{ transformStyle: 'preserve-3d', transform: showFace ? 'rotateY(180deg)' : 'rotateY(0)' }}
@@ -1509,7 +1456,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-gradient-to-br from-pink-500/20 to-pink-500/5 border border-pink-500/30 text-pink-400/80 font-black text-xl md:text-2xl" style={{ backfaceVisibility: 'hidden' }}>?</div>
                         {/* front — real lottery ball */}
                         <div
-                          className={`absolute inset-0 flex items-center justify-center rounded-xl ${isWinner && showFace ? 'bg-yellow-400/20 ring-4 ring-yellow-400 shadow-[0_0_30px_rgba(250,204,21,0.8)] scale-110' : ''}`}
+                          className={`absolute inset-0 flex items-center justify-center rounded-xl ${isWinner && showFace ? 'bg-yellow-400/20 ring-4 ring-yellow-400 shadow-[0_0_30px_rgba(250,204,21,0.8)]' : ''}`}
                           style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
                         >
                           <LotteryBall number={tile.num} showNumber={true} hideShadow={true} className="w-full h-full" />
@@ -1640,6 +1587,16 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
               85%      { transform: translateX(3px) translateY(0) rotate(1deg); }
             }
             .animate-finalist-shake { animation: finalistShake 0.4s ease-in-out infinite; }
+            @keyframes finalistFlash {
+              0%, 100% { filter: drop-shadow(0 0 0 rgba(239,68,68,0)); }
+              50%      { filter: drop-shadow(0 0 50px rgba(239,68,68,0.95)); transform: scale(1.15); }
+            }
+            .animate-finalist-flash { animation: finalistFlash 0.3s ease-in-out infinite; }
+            @keyframes slotRays {
+              from { transform: rotate(0deg); }
+              to   { transform: rotate(360deg); }
+            }
+            .animate-slot-rays { animation: slotRays 6s linear infinite; }
           ` }} />
         </div>
       )}
@@ -2089,10 +2046,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                             <button onClick={() => startRevealSequence('bingo')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
                               <span className="text-xs font-black uppercase tracking-widest text-pink-400">Bingo Eliminate</span>
                               <span className="text-[10px] text-white/50">All 59 balls, eliminated until one remains</span>
-                            </button>
-                            <button onClick={() => startRevealSequence('wheel')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
-                              <span className="text-xs font-black uppercase tracking-widest text-pink-400">Wheel</span>
-                              <span className="text-[10px] text-white/50">Big wheel spins, decelerates under a pointer</span>
                             </button>
                             <button onClick={() => startRevealSequence('tile')} className="flex flex-col items-start gap-1 p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-left transition-all">
                               <span className="text-xs font-black uppercase tracking-widest text-pink-400">Tile Flip</span>
