@@ -849,8 +849,18 @@ const isAdmin = useMemo(() => {
     if (!latestWin || !(latestWin as any).id) return;
     const key = 'seen_reveal_id_' + (latestWin as any).id;
     if (localStorage.getItem(key) === 'true') return;
+    // Don't mark seen yet — only set the flag when the user actually dismisses the
+    // modal. Otherwise an auto-fire that happens while the user is on another tab
+    // (or before they engage with the page) would be "spent" silently.
     startRevealSequence(latestWin.revealStyle);
-    localStorage.setItem(key, 'true');
+  };
+
+  const dismissReveal = () => {
+    cancelRevealAnimations();
+    setShowWinReveal(false);
+    if (latestWin && (latestWin as any).id) {
+      localStorage.setItem('seen_reveal_id_' + (latestWin as any).id, 'true');
+    }
   };
 
   // Whether the user has watched the reveal for the latest paid draw. Drives whether
@@ -1789,7 +1799,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 <h2 className="text-4xl md:text-6xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">No Paid Winner</h2>
                 <p className="text-orange-400 font-black text-lg md:text-2xl tracking-tighter">£{latestWin?.rolloverAmount || 0} rolls into next week</p>
                 <div className="mt-6">
-                  <button onClick={() => { cancelRevealAnimations(); setShowWinReveal(false); }} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
+                  <button onClick={dismissReveal} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
                 </div>
               </>
             ) : (
@@ -1799,7 +1809,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 <h2 className="text-4xl md:text-7xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">{latestWin?.winner}</h2>
                 <p className="text-yellow-400 font-black text-2xl md:text-5xl tracking-tighter drop-shadow-xl">£{latestWin?.prizeAmount || 0}</p>
                 <div className="mt-6">
-                  <button onClick={() => { cancelRevealAnimations(); setShowWinReveal(false); }} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
+                  <button onClick={dismissReveal} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
                 </div>
               </>
             )}
