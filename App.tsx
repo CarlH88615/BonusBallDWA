@@ -447,6 +447,13 @@ const isAdmin = useMemo(() => {
     return upcomingDrawDateTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   }, [upcomingDrawDateTime]);
 
+  // True once the open draw's 8pm slot is in the past — i.e. the draw has happened but
+  // the admin hasn't recorded a winner yet.
+  const drawAwaitingResult = useMemo(() => {
+    if (!upcomingDrawDateTime) return false;
+    return upcomingDrawDateTime.getTime() < Date.now();
+  }, [upcomingDrawDateTime]);
+
   // Returns number of draws this ball is paid through, counting the upcoming draw as 1.
   // Declared before any useMemo that calls it so we don't trip the TDZ on first render.
   const weeksCoveredFor = (ball: any): number => {
@@ -1157,18 +1164,27 @@ useEffect(() => {
 
     setTotalRollover(data.rollover_amount ?? 0);
 
-    // Always normalize the open draw to the upcoming Saturday 20:00 local. If the stored
-    // row is already a future Saturday, keep it; otherwise snap forward and persist.
-    const corrected = computeUpcomingSaturday();
-    const needsCorrection = !data.draw_date || !isFutureSaturday(data.draw_date);
-    if (needsCorrection) {
+    // Never auto-advance an open draw on load. Once Saturday 8pm passes, the row sits
+    // there showing this week's date until the admin records the winner — only THEN
+    // does handleRecordResult set the next draw 7 days forward.
+    //
+    // Safety net: if the stored date is missing entirely OR more than 30 days in the
+    // past (suggests a broken seed row, not just a slow admin), snap forward so the
+    // app stays usable.
+    const isStaleSeed = !data.draw_date || (() => {
+      const [y, m, d] = String(data.draw_date).split('-').map(Number);
+      const dt = new Date(y, m - 1, d, 20, 0, 0, 0);
+      return (Date.now() - dt.getTime()) > 30 * 24 * 60 * 60 * 1000;
+    })();
+    if (isStaleSeed) {
+      const corrected = computeUpcomingSaturday();
       const correctedIso = saturdayIso(corrected);
       const { error: updErr } = await supabase
         .from("bonus_ball_winners")
         .update({ draw_date: corrected, draw_timestamp: correctedIso })
         .eq("id", data.id);
       if (updErr) {
-        console.error("❌ Failed to snap open draw to Saturday", updErr);
+        console.error("❌ Failed to snap stale open draw", updErr);
       }
       setDrawDate(corrected);
     } else {
@@ -2046,7 +2062,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
               {activeTab === 'balls' && (
                 <div className="animate-in fade-in zoom-in-95 duration-500 space-y-10">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 flex items-center justify-between shadow-xl"><div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Upcoming Draw</p><p className="text-2xl font-black text-white">{formattedDrawDate}</p></div><div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-white/20 font-black text-xs">Sat</div></div>
+                    <div className={`border rounded-3xl p-8 flex items-center justify-between shadow-xl ${drawAwaitingResult ? 'bg-orange-500/[0.06] border-orange-500/30' : 'bg-white/[0.03] border-white/10'}`}><div><p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${drawAwaitingResult ? 'text-orange-400' : 'text-white/30'}`}>{drawAwaitingResult ? 'Awaiting Result' : 'Upcoming Draw'}</p><p className="text-2xl font-black text-white">{formattedDrawDate}</p></div><div className={`w-12 h-12 rounded-full border flex items-center justify-center font-black text-xs ${drawAwaitingResult ? 'border-orange-500/40 text-orange-400' : 'border-white/10 text-white/20'}`}>{drawAwaitingResult ? '⏱' : 'Sat'}</div></div>
                     <div className={`relative border rounded-3xl p-6 sm:p-8 shadow-xl w-full overflow-hidden ${totalRollover > 0 ? 'bg-gradient-to-br from-orange-500/20 via-yellow-500/10 to-transparent border-yellow-500/30' : 'bg-white/[0.03] border-white/10'}`}>
                       {totalRollover > 0 && (
                         <div className="absolute -top-2 -right-2 px-3 py-1 rounded-full bg-gradient-to-r from-pink-500 via-orange-400 to-yellow-400 animate-pulse shadow-[0_0_25px_rgba(255,120,0,0.6)]">
