@@ -861,15 +861,15 @@ const isAdmin = useMemo(() => {
     return localStorage.getItem('seen_reveal_id_' + (latestWin as any).id) === 'true';
   }, [latestWin, showWinReveal]);
 
-  // Auto-play the reveal the first time latestWin becomes available after a draw.
-  // Fires on every page load (not just login) so a user who already had the app open
-  // when the result was recorded will see it next time they return.
+  // Auto-play the reveal the first time a signed-in user opens the app after a draw.
+  // Gated on sessionEmail so the splash/login screen doesn't fire the reveal.
   useEffect(() => {
+    if (!sessionEmail) return;
     if (latestWin && (latestWin as any).id && !hasSeenLatestReveal && !showWinReveal) {
-      const t = setTimeout(() => checkReveal(), 400); // small delay so the home tab paints first
+      const t = setTimeout(() => checkReveal(), 400);
       return () => clearTimeout(t);
     }
-  }, [latestWin, hasSeenLatestReveal]);
+  }, [sessionEmail, latestWin, hasSeenLatestReveal]);
 
   // Shared teardown: cancel everything previously scheduled by any reveal style.
   const cancelRevealAnimations = () => {
@@ -2094,7 +2094,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     </div>
                   </div>
                   <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-10 md:p-14 shadow-2xl">
-                    <div className="grid grid-cols-3 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-4 sm:gap-6">
+                    <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-3 sm:gap-6">
                       {balls.map((ball) => {
                         const num = ball.number;
                         const ownerName = ball?.owner;
