@@ -1,6 +1,7 @@
 import type { Handler } from "@netlify/functions";
 import webpush from "web-push";
 import { createClient } from "@supabase/supabase-js";
+import { authorize, internalKey } from "../lib/auth";
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -20,6 +21,16 @@ export const handler: Handler = async (event) => {
     const { title, body, target, userId } = JSON.parse(event.body || "{}");
     if (!title || !body) {
       return { statusCode: 400, body: "Missing title/body" };
+    }
+
+    // Who is asking? Sending to everyone is for the admin (or our own scheduled jobs).
+    // A signed-in member may only send a test to their own devices.
+    const internal = event.headers["x-internal-key"] === internalKey();
+    if (!internal) {
+      const who = await authorize(event.headers["authorization"]);
+      if (!who) return { statusCode: 401, body: "Sign in again to send notifications." };
+      const ownTest = !!userId && userId === who.id;
+      if (!who.isAdmin && !ownTest) return { statusCode: 403, body: "Only the admin can send notifications." };
     }
 
     // Fetch subscriptions (optionally filter to unpaid users)
@@ -108,6 +119,10 @@ export const handler: Handler = async (event) => {
           );
           return { success: true };
         } catch (err: any) {
+          // 404/410 mean the phone has unsubscribed for good: stop sending to it.
+          if (err?.statusCode === 404 || err?.statusCode === 410) {
+            await supabaseAdmin.from("push_subscriptions").update({ active: false }).eq("endpoint", s.endpoint);
+          }
           console.error("Push failed for endpoint:", s.endpoint);
           console.error("Status:", err?.statusCode);
           console.error("Body:", err?.body);

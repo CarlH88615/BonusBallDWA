@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LotteryBall } from './components/LotteryBall';
 import { Reveal, REVEAL_KINDS } from './components/Reveal';
 import type { RevealKind } from './components/Reveal';
+import { Stats, Reactions, Chat } from './components/Social';
+import * as ops from './services/ops';
 import { supabase, DEMO_ROLE, DEMO_ADMIN_EMAIL } from "./services/supabase";
 import type { BallState, NotificationMessage, Tab, AuthMode } from './types';
 
@@ -49,6 +51,7 @@ const saturdayIso = (dateStr: string): string => {
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const isLoggedIn = !!sessionEmail;
   const [userEmail, setUserEmail] = useState('');
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -559,198 +562,109 @@ const isAdmin = useMemo(() => {
       revealStyle: styleForPlayback,
     };
   }, [winnerRows, revealDefaultStyle]);
-  const handleRecordResult = async () => {
-    if (!selectedResultBall) return;
-    const ball = balls.find(b => b.number === selectedResultBall);
-    const isPaidWinner = (() => {
-      if (!ball?.owner) return false;
-      if (!ball?.paidUntil || !upcomingDrawDateTime) return false;
-      const paidDate = new Date(ball.paidUntil);
-      const normalized = new Date(paidDate);
-      normalized.setHours(20, 0, 0, 0);
-      return normalized >= upcomingDrawDateTime;
-    })();
-    const isUnpaidWinner = !isPaidWinner; // vacant or assigned-but-unpaid
-    const paidPot = currentPot - totalRollover; // only payments covering this draw
-    const rolloverPersist = isPaidWinner ? 0 : totalRollover + paidPot;
-    const amountWon = isPaidWinner ? paidPot + totalRollover : 0;
-    setTotalRollover(rolloverPersist);
-    setRolloverAmount(rolloverPersist);
-    const drawDate = upcomingDrawDateTime.toISOString().split('T')[0];
-    const drawTimestamp = upcomingDrawDateTime.toISOString();
-    const winnerName = ball?.owner ?? null;
-
+  // ---- Talking to the server for anything that moves money ----
+  const authHeader = async (): Promise<Record<string, string>> => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    return token ? { authorization: `Bearer ${token}` } : {};
+  };
+  // Payments, results and undo run on the server in one request, so a phone losing signal
+  // halfway can't leave the books half-written. The local demo runs the same code directly.
+  const callAdmin = async (action: 'payment' | 'result' | 'undo_result' | 'undo_status', input: Record<string, any> = {}): Promise<any> => {
+    if (DEMO_ROLE) {
+      if (action === 'payment') return ops.recordPayment(supabase, input as any);
+      if (action === 'result') return ops.recordResult(supabase, input as any);
+      if (action === 'undo_result') return ops.undoResult(supabase);
+      return ops.undoStatus(supabase);
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
     try {
-      // Fetch open draw row
-      const { data: openRow, error: fetchOpenErr } = await supabase
-        .from("bonus_ball_winners")
-        .select("*")
-        .eq("status", "open")
-        .single();
-      if (fetchOpenErr || !openRow) {
-        console.error("❌ Failed to fetch open draw", fetchOpenErr);
-        showToast("error", "Couldn't find the open draw. Nothing was saved.");
-        return;
+      const res = await fetch('/.netlify/functions/admin-action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(await authHeader()) },
+        body: JSON.stringify({ action, ...input }),
+        signal: controller.signal,
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text || 'Something went wrong. Nothing was changed.');
+      return JSON.parse(text);
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || err instanceof TypeError) {
+        throw new Error("No reply from the server. Check your signal. It may still have saved, so look before trying again.");
       }
-
-      // Current draw is always Saturday — next draw is exactly 7 local days later (also Saturday).
-      const [cy, cm, cd] = openRow.draw_date.split('-').map(Number);
-      const nextLocal = new Date(cy, cm - 1, cd, 20, 0, 0, 0);
-      nextLocal.setDate(nextLocal.getDate() + 7);
-      const nextDrawDateStr = `${nextLocal.getFullYear()}-${String(nextLocal.getMonth() + 1).padStart(2, '0')}-${String(nextLocal.getDate()).padStart(2, '0')}`;
-      const nextDrawTimestampIso = nextLocal.toISOString();
-
-      // Update open row to completed. reveal_style is the override (or default).
-      const chosenStyle: RevealStyle = (recordRevealStyle as RevealStyle) || revealDefaultStyle;
-      const updatePayload: Record<string, any> = {
-        status: "completed",
-        winning_number: selectedResultBall,
-        winner_name: winnerName,
-        amount_won: amountWon,
-        rollover_amount: rolloverPersist,
-        completed_at: new Date().toISOString(),
-        reveal_style: chosenStyle,
-      };
-      let { error: updateErr } = await supabase
-        .from("bonus_ball_winners")
-        .update(updatePayload)
-        .eq("id", openRow.id);
-      // Graceful fallback if the reveal_style column hasn't been added yet to Supabase.
-      if (updateErr && /reveal_style/i.test(updateErr.message || '')) {
-        console.warn("reveal_style column missing — retrying without it. Run the SQL in admin to enable per-draw styles.");
-        delete updatePayload.reveal_style;
-        const retry = await supabase
-          .from("bonus_ball_winners")
-          .update(updatePayload)
-          .eq("id", openRow.id);
-        updateErr = retry.error;
-      }
-      if (updateErr) {
-        console.error("❌ Failed to record winner", updateErr);
-        showToast("error", "Couldn't save the result. Nothing was changed.");
-        return;
-      }
-      console.log("✅ Winner recorded");
-      setRecordRevealStyle(''); // reset for next time
-
-      // Insert next open row
-      const { error: newOpenErr } = await supabase
-        .from("bonus_ball_winners")
-        .insert([
-          {
-            draw_date: nextDrawDateStr,
-            draw_timestamp: nextDrawTimestampIso,
-            status: "open",
-            rollover_amount: rolloverPersist,
-          },
-        ]);
-      if (newOpenErr) {
-        console.error("❌ Failed to create next open draw", newOpenErr);
-        showToast("error", "Result saved, but next week's draw wasn't created. Check before taking payments.");
-        return;
-      }
-      setDrawDate(nextDrawDateStr);
-      setSelectedResultBall(null);
-      showToast("success", isPaidWinner ? `Saved. ${winnerName} wins £${amountWon}.` : `Saved. £${rolloverPersist} rolls over.`);
-      if (notifyOnResult) {
-        sendPush("Saturday's ball is in", "Open Bonus Ball and scratch to see if it's yours.", "all", "win");
-      }
-
-      // Update bank only when a paid winner takes money out. Unpaid wins roll 100% forward, so no bank/ledger movement.
-      if (isPaidWinner) {
-        const bankDelta = -(paidPot + totalRollover);
-        const newBalance = await adjustBank(bankDelta);
-        if (newBalance !== null) {
-          const { error: ledgerErr } = await supabase
-            .from("bonus_ball_ledger")
-            .insert([
-              {
-                type: "paid_win",
-                amount: Math.abs(bankDelta),
-                reference: `Draw ${drawDate}`,
-                notes: `Paid winner - Ball ${selectedResultBall}`,
-              },
-            ]);
-          if (ledgerErr) {
-            console.error("❌ Failed to write ledger entry", ledgerErr);
-          }
-          reloadLedger();
-        }
-      }
-
-      // Reload winners list
-      const { data, error: fetchErr } = await supabase
-        .from("bonus_ball_winners")
-        .select("*")
-        .order("draw_date", { ascending: false });
-      if (fetchErr) {
-        console.error("❌ Failed to load winners", fetchErr);
-        return;
-      }
-      setWinnerRows(data ?? []);
-    } catch (err) {
-      console.error("❌ Unexpected error in handleRecordResult", err);
-      showToast("error", "Something went wrong saving the result.");
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
   };
-  const handleHardReset = async () => {
-    if (!isAdmin) return;
-    if (!ADMIN_PIN) {
-      showToast("error", "Hard reset disabled — VITE_ADMIN_PIN not configured.");
-      return;
-    }
-    if (resetPin !== ADMIN_PIN) {
-      showToast("error", "Incorrect PIN");
-      return;
-    }
-    if (!confirm("This cannot be undone. Proceed with hard reset?")) return;
-    setIsResetting(true);
+  // Everything the server sends back after a change, applied in one go.
+  const applySnapshot = (snap: any) => {
+    setBalls(snap.balls);
+    setBankBalance(snap.bankBalance);
+    setDrawDate(snap.drawDate);
+    setTotalRollover(snap.rollover);
+    setRolloverAmount(snap.rollover);
+    setWinnerRows(snap.winners);
+    reloadLedger();
+  };
+  // After a "no reply", re-read everything so the screen shows what really happened.
+  const refreshEverything = async () => {
+    await loadBallsFromDb();
+    await fetchBankBalance();
+    const open = await supabase.from('bonus_ball_winners').select('draw_date, rollover_amount').eq('status', 'open').single();
+    if (open.data) { setDrawDate(open.data.draw_date); setTotalRollover(open.data.rollover_amount ?? 0); }
+    const done = await supabase.from('bonus_ball_winners').select('*').eq('status', 'completed').order('draw_date', { ascending: false });
+    if (done.data) setWinnerRows(done.data);
+    reloadLedger();
+  };
+
+  const [undoInfo, setUndoInfo] = useState<{ ballNum: number; minutesLeft: number } | null>(null);
+  const [undoArmed, setUndoArmed] = useState(false);
+  const refreshUndo = async () => {
     try {
-      // build fresh canonical ball set
-      const freshBalls = Array.from({ length: 59 }, (_, i) => ({
-        number: i + 1,
-        ownerName: null,
-        owner: null,
-        userId: null,
-        email: null,
-        paidUntil: null,
-      }));
+      const st = await callAdmin('undo_status');
+      setUndoInfo(st.ok ? { ballNum: Number(st.last.winning_number), minutesLeft: st.minutesLeft } : null);
+    } catch {
+      setUndoInfo(null);
+    }
+  };
+  const handleUndoResult = async () => {
+    if (!undoArmed) {
+      setUndoArmed(true);
+      setTimeout(() => setUndoArmed(false), 5000);
+      return;
+    }
+    setUndoArmed(false);
+    try {
+      const res = await callAdmin('undo_result');
+      applySnapshot(res);
+      setUndoInfo(null);
+      showToast('success', `Undone. Ball ${res.summary.ballNum} is no longer the result, and the draw is open again.`);
+    } catch (err: any) {
+      showToast('error', err?.message ?? "Couldn't undo.");
+      refreshEverything();
+    }
+  };
 
-      const winnerDelete = await supabase
-        .from("bonus_ball_winners")
-        .delete()
-        .not("id", "is", null);
-      if (winnerDelete.error) throw winnerDelete.error;
-
-      const bankReset = await supabase
-        .from("bonus_ball_bank")
-        .update({ balance: 0 })
-        .eq("id", 1)
-        .single();
-      if (bankReset.error) throw bankReset.error;
-
-      const targetId = bonusBallRowId ?? 1;
-      const ballsReset = await supabase
-        .from("bonus_ball_data")
-        .update({ state: { balls: freshBalls } })
-        .eq("id", targetId)
-        .single();
-      if (ballsReset.error) throw ballsReset.error;
-
-      setBalls(freshBalls);
-      setTotalRollover(0);
-      setRolloverAmount(0);
-      setSelectedBallNum(null);
-      setWinnerRows([]);
-      setBankBalance(bankReset.data?.balance ?? 0);
-      fetchBankBalance();
-      loadBallsFromDb();
-    } catch (err) {
-      console.error("❌ Hard reset failed", err);
-      showToast("error", "Reset failed. Check console for details.");
-    } finally {
-      setIsResetting(false);
-      setResetPin('');
+  const handleRecordResult = async () => {
+    if (!selectedResultBall) return;
+    try {
+      const chosenStyle: RevealStyle = (recordRevealStyle as RevealStyle) || revealDefaultStyle;
+      const res = await callAdmin('result', { ballNum: selectedResultBall, revealStyle: chosenStyle });
+      applySnapshot(res);
+      setRecordRevealStyle('');
+      setSelectedResultBall(null);
+      const r = res.summary;
+      if (res.warning) showToast('error', res.warning);
+      else showToast('success', r.paidWinner ? `Saved. ${r.winnerName} wins £${r.amountWon}.` : `Saved. £${r.rolloverOut} rolls over.`);
+      refreshUndo();
+      if (notifyOnResult) {
+        sendPush("Saturday's ball is in", "Open Bonus Ball to see if it's yours.", "all", "win");
+      }
+    } catch (err: any) {
+      showToast('error', err?.message ?? "Couldn't save the result.");
+      refreshEverything();
     }
   };
   // HANDLERS
@@ -924,6 +838,7 @@ useEffect(() => {
     setIsRecoveryMode(recoveryFlag);
     if (recoveryFlag) setAuthMode("reset");
     setSessionEmail(data.session?.user.email ?? null);
+    setUserId(data.session?.user.id ?? null);
   });
 
   const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
@@ -941,6 +856,7 @@ useEffect(() => {
     const recoveryFlag = Boolean((session?.user as any)?.recovery_sent_at);
     setIsRecoveryMode(recoveryFlag);
     setSessionEmail(session?.user.email ?? null);
+    setUserId(session?.user.id ?? null);
   });
 
   return () => sub.subscription.unsubscribe();
@@ -1129,7 +1045,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     try {
       const res = await fetch("/.netlify/functions/push-broadcast", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(await authHeader()) },
         body: JSON.stringify({ title, body, target }),
         signal: controller.signal,
       });
@@ -1253,82 +1169,32 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     setAdminAction({ type: 'assign', ballNum });
   };
 
+  const [payBusy, setPayBusy] = useState(false);
   const commitPayment = async () => {
-    if (!isAdmin) return;
+    if (!isAdmin || payBusy) return;
     const num = payBall ?? adminAction?.ballNum;
     const weeks = parseInt(paymentWeeks);
-    if (!num || isNaN(weeks) || weeks < 1) return;
-
-    const selectedBall = balls.find(b => b.number === num);
-    const targetOwner = applyToAllOwner ? selectedBall?.owner : null;
-    const affectedNumbers = applyToAllOwner && targetOwner
-      ? balls.filter(b => b.owner === targetOwner).map(b => b.number)
-      : [num];
-
-    const weekMs = 7 * 24 * 60 * 60 * 1000;
-    const updatedBalls = balls.map(ball => {
-      if (!affectedNumbers.includes(ball.number)) return ball;
-      if (!upcomingDrawDateTime) return ball;
-
-      const existingPaidUntil = ball.paidUntil ? new Date(ball.paidUntil) : null;
-      const alreadyCovered = existingPaidUntil && existingPaidUntil >= upcomingDrawDateTime;
-
-      // If already covering the upcoming draw, the new payment adds full weeks on top of
-      // existing paidUntil. If not covered, the first week pays for the upcoming draw
-      // itself, so paidUntil = upcomingDraw + (weeks - 1).
-      const newPaidUntilDate = alreadyCovered
-        ? new Date(existingPaidUntil!.getTime() + weeks * weekMs)
-        : new Date(upcomingDrawDateTime.getTime() + (weeks - 1) * weekMs);
-
-      return {
-        ...ball,
-        paidUntil: newPaidUntilDate.toISOString(),
-      };
-    });
-
-    if (!bonusBallRowId) return;
-
-    console.log(`💾 Persisting payment for bonus_ball_data row ${bonusBallRowId}`);
-    console.log(`💾 Persisting payment for ball ${num}`);
-    const { error } = await supabase
-      .from("bonus_ball_data")
-      .update({ state: { balls: updatedBalls } })
-      .eq("id", bonusBallRowId);
-    if (error) {
-      console.error("❌ Failed to persist payment", error);
-      showToast("error", "Payment didn't save.");
+    if (!num || isNaN(weeks) || weeks < 1) {
+      showToast('error', 'Enter a number of weeks, 1 or more.');
       return;
     }
-    setBalls(updatedBalls);
-    console.log("✅ Payment persisted");
-    const paymentAmount = weeks * 2 * affectedNumbers.length;
-    const newBalance = await adjustBank(paymentAmount);
-    if (newBalance !== null) {
-      const { error: ledgerErr } = await supabase
-        .from("bonus_ball_ledger")
-        .insert([
-          {
-            type: "deposit",
-            amount: paymentAmount,
-            reference: "Ball payment",
-            notes: `Payment for ${affectedNumbers.length} ball(s), ${weeks} week(s)`,
-          },
-        ]);
-      if (ledgerErr) {
-        console.error("❌ Failed to write ledger entry (deposit)", ledgerErr);
-      }
-      reloadLedger();
+    setPayBusy(true);
+    try {
+      const res = await callAdmin('payment', { ballNum: num, weeks, applyToAll: applyToAllOwner });
+      applySnapshot(res);
+      const r = res.summary;
+      showToast('success', `Ball${r.numbers.length > 1 ? 's' : ''} ${r.numbers.join(', ')} paid up to ${shortDate(r.paidUntil)} (£${r.amount}).`);
+      setAdminAction(null);
+      setPayBall(null);
+      setPaymentWeeks('1');
+      setApplyToAllOwner(false);
+      refreshUndo();
+    } catch (err: any) {
+      showToast('error', err?.message ?? "Payment didn't save.");
+      refreshEverything();
+    } finally {
+      setPayBusy(false);
     }
-
-    const ballsLabel = affectedNumbers.map((n) => `#${n}`).join(', ');
-    const newPaidThrough = updatedBalls.find((b) => b.number === affectedNumbers[0])?.paidUntil;
-    const throughLabel = newPaidThrough ? ` through ${formatPaidUntil(newPaidThrough)}` : '';
-    showToast("success", `Ball${affectedNumbers.length > 1 ? 's' : ''} ${ballsLabel} paid${throughLabel} (£${paymentAmount}).`);
-    sendPush("Payment Logged", `Ball${affectedNumbers.length > 1 ? 's' : ''} ${ballsLabel} paid${throughLabel}`, "admin", "reminder");
-    setAdminAction(null);
-    setPayBall(null);
-    setPaymentWeeks('1');
-    setApplyToAllOwner(false);
   };
 
   const handleUpdatePaymentInitiate = (ballNum: number) => {
@@ -1363,8 +1229,56 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
   // The money tab needs the ledger to say whether the books balance.
   useEffect(() => {
-    if (activeTab === 'admin' && isAdmin) reloadLedger();
+    if (activeTab === 'admin' && isAdmin) { reloadLedger(); refreshUndo(); }
   }, [activeTab, isAdmin]);
+
+  // ---- Family chat. Needs its own table; if that isn't there the chat button doesn't show. ----
+  const [chatAvailable, setChatAvailable] = useState(false);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [showChat, setShowChat] = useState(false);
+  const [chatLastRead, setChatLastRead] = useState<string>(() =>
+    (typeof window !== 'undefined' && localStorage.getItem('chat_last_read')) || ''
+  );
+  const myName =
+    (members as any[]).find((m) => (m.email ?? '').toLowerCase() === (sessionEmail ?? '').toLowerCase())?.full_name ||
+    myBalls[0]?.owner ||
+    (sessionEmail ?? 'Someone').split('@')[0];
+  const loadChat = async () => {
+    const { data, error } = await supabase.from('bonus_ball_chat').select('*').order('created_at', { ascending: false }).limit(200);
+    if (error) { setChatAvailable(false); return; }
+    setChatAvailable(true);
+    setChatMessages([...(data ?? [])].reverse());
+  };
+  const markChatRead = () => {
+    const now = new Date().toISOString();
+    localStorage.setItem('chat_last_read', now);
+    setChatLastRead(now);
+  };
+  useEffect(() => {
+    if (!sessionEmail) return;
+    loadChat();
+    const channel = supabase
+      .channel('chat-refresh')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bonus_ball_chat' }, loadChat)
+      .subscribe();
+    return () => { channel.unsubscribe(); };
+  }, [sessionEmail]);
+  useEffect(() => { if (showChat) markChatRead(); }, [showChat, chatMessages.length]);
+  const chatUnread = chatMessages.filter((m) => m.user_id !== userId && m.created_at > chatLastRead).length;
+  const sendChat = async (body: string): Promise<boolean> => {
+    if (!userId) return false;
+    const { error } = await supabase.from('bonus_ball_chat').insert([{ user_id: userId, name: myName, body, kind: 'user' }]);
+    if (error) { showToast('error', "Message didn't send. Check your signal."); return false; }
+    await loadChat();
+    return true;
+  };
+  const deleteChat = async (id: string) => {
+    const { error } = await supabase.from('bonus_ball_chat').delete().eq('id', id);
+    if (error) showToast('error', "Couldn't delete that message.");
+    await loadChat();
+  };
+  // Draws this person is allowed to see: the latest stays hidden until they've watched the reveal.
+  const visibleWinners = (winnerRows as any[]).filter((r) => hasSeenLatestReveal || r.id !== (latestWin as any)?.id);
 
   const UI = {
     card: 'bg-white rounded-3xl p-4 sm:p-5',
@@ -1487,7 +1401,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
           <b className="text-[#14161c]">£{p.cost}</b> for {p.count} ball{p.count === 1 ? '' : 's'}.
           {p.until && <> In up to and including <b className="text-[#14161c]">{shortDate(p.until)}</b>.</>}
         </p>
-        <button className={UI.btn + ' w-full py-3'} onClick={commitPayment}>Save payment</button>
+        <button className={UI.btn + ' w-full py-3'} disabled={payBusy} onClick={commitPayment}>{payBusy ? 'Saving…' : 'Save payment'}</button>
       </div>
     );
   };
@@ -1577,17 +1491,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     }
   };
 
-  const copyUserId = async () => {
-    const { data } = await supabase.auth.getUser();
-    const id = data.user?.id;
-    if (!id) {
-      showToast('error', 'Not logged in.');
-      return;
-    }
-    await navigator.clipboard.writeText(id);
-    showToast('success', 'User ID copied.');
-  };
-
   // Sends only to the signed-in person's own devices, and says why if it fails.
   const sendTestPush = async () => {
     const { data } = await supabase.auth.getUser();
@@ -1599,7 +1502,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     try {
       const res = await fetch('/.netlify/functions/push-broadcast', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...(await authHeader()) },
         body: JSON.stringify({ title: 'Bonus Ball test', body: 'Notifications are working on this phone.', userId }),
       });
       const text = await res.text();
@@ -1770,6 +1673,16 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         <p className={`text-xs font-bold ${!ledgerLoaded ? 'text-[#5a6270]' : booksOk ? 'text-green-700' : 'text-red-600'}`}>{!ledgerLoaded ? 'Bank' : booksOk ? 'Bank ✓' : 'Bank: check'}</p>
                       </button>
                     </div>
+
+                    {undoInfo && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-3xl p-4 flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-extrabold">Entered the wrong ball?</p>
+                          <p className={`text-xs ${UI.dim}`}>You saved ball {undoInfo.ballNum}. You can undo it for another {undoInfo.minutesLeft} min, as long as no payment is recorded first.</p>
+                        </div>
+                        <button className={UI.ghost + ' bg-white flex-none'} onClick={handleUndoResult}>{undoArmed ? 'Tap again to undo' : 'Undo'}</button>
+                      </div>
+                    )}
 
                     <div className={UI.card + ' space-y-3'}>
                       <h3 className="font-extrabold flex items-center gap-2">
@@ -1970,13 +1883,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                         </div>
                       </div>
                       <div>
-                        <p className={UI.label + ' mb-1.5'}>How</p>
-                        <div className="flex gap-2 flex-wrap">
-                          <button className={chip(deliveryMode === 'push')} onClick={() => setDeliveryMode('push')}>Phone notification</button>
-                          <button className={chip(deliveryMode === 'inapp')} onClick={() => setDeliveryMode('inapp')}>In-app inbox</button>
-                        </div>
-                      </div>
-                      <div>
                         <p className={UI.label + ' mb-1.5'}>When</p>
                         <div className="flex gap-2 flex-wrap">
                           <button className={chip(scheduleMode === 'now')} onClick={() => setScheduleMode('now')}>Now</button>
@@ -2045,23 +1951,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       <div className="flex-1"><p className="font-bold">Send a test notification</p><p className={`text-xs ${UI.dim}`}>Goes only to your own phone.</p></div>
                       <button className={UI.ghost} onClick={sendTestPush}>Send</button>
                     </div>
-                    <div className={UI.card + ' flex items-center gap-3'}>
-                      <div className="flex-1"><p className="font-bold">Copy my user ID</p><p className={`text-xs ${UI.dim}`}>For fixing account links.</p></div>
-                      <button className={UI.ghost} onClick={copyUserId}>Copy</button>
-                    </div>
-                    <div className="bg-white rounded-3xl p-4 sm:p-5 border-2 border-red-200">
-                      <button onClick={() => setDangerOpen((v) => !v)} className="w-full flex items-center justify-between text-left">
-                        <div><p className="font-extrabold text-red-700">Hard reset</p><p className={`text-xs ${UI.dim}`}>Clears every ball and winner, and sets the bank to £0.</p></div>
-                        <span className={UI.dim}>{dangerOpen ? '▾' : '▸'}</span>
-                      </button>
-                      {dangerOpen && (
-                        <div className="mt-4 space-y-2">
-                          <p className="text-sm text-red-700">This cannot be undone. Past ledger entries stay.</p>
-                          <input type="password" aria-label="PIN" placeholder="Enter PIN" className={UI.input} value={resetPin} onChange={(e) => setResetPin(e.target.value)} />
-                          <button disabled={isResetting} onClick={handleHardReset} className="w-full py-3 rounded-xl bg-red-600 text-white font-extrabold disabled:opacity-50">{isResetting ? 'Resetting…' : 'Hard reset'}</button>
-                        </div>
-                      )}
-                    </div>
                   </>
                 )}
               </div>
@@ -2072,6 +1961,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
               <header className="rounded-b-[2rem] px-5 pt-5 pb-7" style={{ background: me.bg, color: me.fg }}>
                 <div className="flex items-center gap-2">
                   <p className="flex-1 text-lg font-extrabold tracking-tight">Bonus Ball</p>
+                  {chatAvailable && (
+                    <button aria-label="Family chat" onClick={() => setShowChat(true)} className="relative w-10 h-10 rounded-full bg-black/15 flex items-center justify-center">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.6A8 8 0 1121 12z" /></svg>
+                      {chatUnread > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#ffd100] text-[#14161c] text-[11px] font-extrabold flex items-center justify-center">{chatUnread > 9 ? '9+' : chatUnread}</span>}
+                    </button>
+                  )}
                   <button
                     aria-label="Notifications"
                     onClick={() => { setShowInbox(true); setNotifications((prev) => prev.map((n) => ({ ...n, read: true }))); }}
@@ -2128,13 +2023,16 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
                 {/* LAST DRAW — hidden until they've seen the reveal */}
                 {latestWin && hasSeenLatestReveal && (
-                  <section className={UI.card + ' flex items-center gap-3'}>
-                    <LotteryBall number={latestWin.ballNumber} hideShadow className="w-14 h-14 flex-none" />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm ${UI.dim}`}>Last draw, {drawDayLabel(latestWin.date)}</p>
-                      <p className="font-extrabold leading-snug">{latestWin.isRollover ? `Rolled over (£${latestWin.rolloverAmount})` : `${latestWin.winner} won £${latestWin.prizeAmount}`}</p>
+                  <section className={UI.card + ' space-y-3'}>
+                    <div className="flex items-center gap-3">
+                      <LotteryBall number={latestWin.ballNumber} hideShadow className="w-14 h-14 flex-none" />
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm ${UI.dim}`}>Last draw, {drawDayLabel(latestWin.date)}</p>
+                        <p className="font-extrabold leading-snug">{latestWin.isRollover ? `Rolled over (£${latestWin.rolloverAmount})` : `${latestWin.winner} won £${latestWin.prizeAmount}`}</p>
+                      </div>
+                      <button className={UI.ghost} onClick={() => startRevealSequence(revealDefaultStyle)}>Replay</button>
                     </div>
-                    <button className={UI.ghost} onClick={() => startRevealSequence(revealDefaultStyle)}>Replay</button>
+                    <Reactions supabase={supabase} drawId={(latestWin as any).id} userId={userId} />
                   </section>
                 )}
 
@@ -2161,6 +2059,8 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   </div>
                   <p className={`text-xs ${UI.dim}`}>Colour means in. Faded with a dashed ring means not paid. Dotted means free. Tap any ball to see whose it is.</p>
                 </section>
+
+                <Stats winners={visibleWinners} balls={balls} myNumbers={myBalls.map((b) => b.number)} />
 
                 {/* WINNERS */}
                 <section className={UI.card + ' space-y-3'}>
@@ -2191,6 +2091,20 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                 <p className={`text-sm text-center px-4 pt-2 ${UI.dim}`}>£2 a ball each week. Drawn Saturday 8pm using the National Lottery bonus ball. If the ball that comes up isn't paid, the whole pot rolls over.</p>
               </main>
             </div>
+          )}
+
+          {/* FAMILY CHAT */}
+          {showChat && chatAvailable && (
+            <Chat
+              messages={chatMessages}
+              userId={userId}
+              isAdmin={isAdmin}
+              bg={me.bg}
+              fg={me.fg}
+              onSend={sendChat}
+              onDelete={deleteChat}
+              onClose={() => { markChatRead(); setShowChat(false); }}
+            />
           )}
 
           {/* ACCOUNT SHEET */}

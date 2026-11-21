@@ -65,6 +65,15 @@ const buildTables = (role: 'member' | 'admin') => {
       { id: 's1', title: 'Announcement', body: 'Pay up for Saturday', target: 'unpaid', delivery_mode: 'push', send_at: weeksFrom(draw, 0).toISOString(), repeat_rule: 'weekly:Fri:18:00', active: true, created_at: new Date().toISOString() },
     ],
     push_subscriptions: [],
+    bonus_ball_chat: [
+      { id: 'c1', user_id: null, name: 'Bonus Ball', kind: 'system', body: "Saturday's ball is in. Open the app to see it.", created_at: weeksFrom(draw, -1).toISOString() },
+      { id: 'c2', user_id: 'm2', name: 'Auntie Jean', kind: 'user', body: 'GET IN. Drinks are on me (one each)', created_at: new Date(Date.now() - 3600000).toISOString() },
+      { id: 'c3', user_id: 'm3', name: 'Kev', kind: 'user', body: 'Fix. Demand a recount', created_at: new Date(Date.now() - 3000000).toISOString() },
+    ],
+    bonus_ball_reactions: [
+      { id: 'r1', draw_id: 'w0', user_id: 'm2', emoji: '🎉', created_at: new Date().toISOString() },
+      { id: 'r2', draw_id: 'w0', user_id: 'm3', emoji: '😡', created_at: new Date().toISOString() },
+    ],
   } as Record<string, any[]>;
 };
 
@@ -76,6 +85,7 @@ class Query {
   private payload: any = null;
   private orderBy: { col: string; asc: boolean } | null = null;
   private wantSingle = false;
+  private max: number | null = null;
   constructor(private tables: Record<string, any[]>, private table: string) {}
 
   select() { return this; }
@@ -84,6 +94,10 @@ class Query {
   upsert(values: any) { this.op = 'upsert'; this.payload = values; return this; }
   delete() { this.op = 'delete'; return this; }
   eq(col: string, val: any) { this.filters.push((r) => r[col] === val); return this; }
+  gt(col: string, val: any) { this.filters.push((r) => r[col] > val); return this; }
+  gte(col: string, val: any) { this.filters.push((r) => r[col] >= val); return this; }
+  lte(col: string, val: any) { this.filters.push((r) => r[col] <= val); return this; }
+  limit(n: number) { this.max = n; return this; }
   in(col: string, vals: any[]) { this.filters.push((r) => vals.includes(r[col])); return this; }
   not() { return this; } // only used as "every row"
   order(col: string, opts?: { ascending?: boolean }) { this.orderBy = { col, asc: opts?.ascending !== false }; return this; }
@@ -110,6 +124,7 @@ class Query {
       result = rows.filter(match);
       this.tables[this.table] = rows.filter((r) => !match(r));
     }
+    if (this.max != null) result = result.slice(0, this.max);
     if (this.wantSingle) {
       return result.length ? { data: clone(result[0]), error: null } : { data: null, error: { message: 'No rows found' } };
     }

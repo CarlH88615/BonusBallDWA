@@ -1,5 +1,6 @@
 import { schedule } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
+import { internalKey } from "../lib/auth";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -21,7 +22,7 @@ export const handler = schedule("*/1 * * * *", async () => {
   for (const notification of dueNotifications) {
     await fetch(`${process.env.URL}/.netlify/functions/push-broadcast`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-internal-key": internalKey() },
       body: JSON.stringify({
         title: notification.title,
         body: notification.body,
