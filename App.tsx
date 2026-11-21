@@ -1234,6 +1234,14 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
   // ---- Family chat. Needs its own table; if that isn't there the chat button doesn't show. ----
   const [chatAvailable, setChatAvailable] = useState(false);
+  // Charity money recorded in this app's ledger before the charity side was dropped. Bragging rights only.
+  const [ledgerCharity, setLedgerCharity] = useState(0);
+  useEffect(() => {
+    if (!sessionEmail) return;
+    supabase.from('bonus_ball_ledger').select('amount').eq('type', 'charity').then(({ data, error }: any) => {
+      if (!error) setLedgerCharity((data ?? []).reduce((sum: number, r: any) => sum + Math.abs(Number(r.amount) || 0), 0));
+    });
+  }, [sessionEmail]);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [showChat, setShowChat] = useState(false);
   const [chatLastRead, setChatLastRead] = useState<string>(() =>
@@ -2060,7 +2068,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                   <p className={`text-xs ${UI.dim}`}>Colour means in. Faded with a dashed ring means not paid. Dotted means free. Tap any ball to see whose it is.</p>
                 </section>
 
-                <Stats winners={visibleWinners} balls={balls} myNumbers={myBalls.map((b) => b.number)} />
+                <Stats winners={visibleWinners} balls={balls} myNumbers={myBalls.map((b) => b.number)} ledgerCharity={ledgerCharity} />
 
                 {/* WINNERS */}
                 <section className={UI.card + ' space-y-3'}>
@@ -2074,7 +2082,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <div key={r.id} className="flex items-center gap-3">
                             <LotteryBall number={Number(r.winning_number)} hideShadow className="w-10 h-10 flex-none" />
                             <div className="flex-1 min-w-0">
-                              <p className="font-bold truncate">{r.winner_name ?? (Number(r.rollover_amount) > 0 ? 'Rolled over' : 'No winner')}</p>
+                              <p className="font-bold truncate">{r.winner_name ?? (Number(r.rollover_amount) > 0 ? 'Rolled over' : String(r.draw_date) <= '2026-02-07' ? 'Went to charity' : 'No winner')}</p>
                               <p className={`text-xs ${UI.dim}`}>{drawDayLabel(r.draw_date)}</p>
                             </div>
                             {r.winner_name && <p className="font-extrabold tabular-nums">£{r.amount_won}</p>}

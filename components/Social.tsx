@@ -13,7 +13,13 @@ interface StatsProps {
   winners: any[]; // completed draws the viewer is allowed to see, newest first
   balls: any[];
   myNumbers: number[];
+  ledgerCharity?: number; // charity payments recorded in this app's ledger
 }
+
+// The old app (20 Sep 2025 to 7 Feb 2026) gave £372 to charity in total. That figure is fixed:
+// it only counts once those old results have been brought in.
+const OLD_APP_CHARITY = 372;
+const OLD_APP_LAST_DRAW = '2026-02-07';
 
 const dayLabel = (dateStr: string) => {
   const [y, m, d] = String(dateStr).split('-').map(Number);
@@ -21,7 +27,7 @@ const dayLabel = (dateStr: string) => {
   return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers }) => {
+export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers, ledgerCharity = 0 }) => {
   const stats = useMemo(() => {
     const draws = winners.filter((r) => r.winning_number);
     if (draws.length < 3) return null;
@@ -39,6 +45,8 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers }) => {
     const mostWins = [...byName.entries()].sort((a, b) => b[1].wins - a[1].wins || b[1].total - a[1].total)[0];
     const biggest = [...paid].sort((a, b) => Number(b.amount_won) - Number(a.amount_won))[0];
     const paidOut = paid.reduce((sum, r) => sum + Number(r.amount_won), 0);
+    const hasOldResults = draws.some((r) => String(r.draw_date) < OLD_APP_LAST_DRAW);
+    const charity = (hasOldResults ? OLD_APP_CHARITY : 0) + ledgerCharity;
 
     // Longest wait: of the people who own a ball today, who has gone most draws without a win.
     const owners = [...new Set(balls.map((b) => b?.owner).filter(Boolean))] as string[];
@@ -52,8 +60,8 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers }) => {
     const drawn = new Set(byBall.keys());
     const never = Array.from({ length: 59 }, (_, i) => i + 1).filter((n) => !drawn.has(n));
     const mineNever = myNumbers.filter((n) => never.includes(n));
-    return { count: draws.length, luckiest, mostWins, biggest, longest: longest as { name: string; draws: number; never: boolean } | null, never, mineNever, first: draws[draws.length - 1].draw_date as string, paidOut, paidCount: paid.length };
-  }, [winners, balls, myNumbers]);
+    return { count: draws.length, luckiest, mostWins, biggest, longest: longest as { name: string; draws: number; never: boolean } | null, never, mineNever, charity, first: draws[draws.length - 1].draw_date as string, paidOut, paidCount: paid.length };
+  }, [winners, balls, myNumbers, ledgerCharity]);
 
   if (!stats) return null;
   const Row = ({ icon, title, sub, value }: { icon: React.ReactNode; title: string; sub: string; value: string }) => (
@@ -73,6 +81,9 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers }) => {
       </div>
       {stats.paidOut > 0 && (
         <Row icon={badge('£', 'bg-[#1f9d55] text-white')} title="Total paid out" sub={`${stats.paidCount} ${stats.paidCount === 1 ? 'win' : 'wins'} since ${dayLabel(stats.first)}`} value={`£${stats.paidOut.toLocaleString('en-GB')}`} />
+      )}
+      {stats.charity > 0 && (
+        <Row icon={badge('♥', 'bg-[#e0457b] text-white')} title="Went to charity" sub="From the weeks nobody won, back when it was for charity" value={`£${stats.charity.toLocaleString('en-GB')}`} />
       )}
       {stats.luckiest && stats.luckiest[1] > 1 && (
         <Row icon={<LotteryBall number={stats.luckiest[0]} hideShadow className="w-full h-full" />} title="Luckiest ball" sub={`${stats.luckiest[0]} has come up ${stats.luckiest[1]} times`} value={`×${stats.luckiest[1]}`} />

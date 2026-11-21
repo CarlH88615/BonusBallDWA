@@ -56,6 +56,9 @@ const buildTables = (role: 'member' | 'admin') => {
         id: `w${i}`, draw_date: ymd(weeksFrom(draw, -(i + 1))), status: 'completed', winning_number: p.n, winner_name: p.w,
         amount_won: p.a, rollover_amount: p.w ? 0 : 28, reveal_style: 'scratch', completed_at: weeksFrom(draw, -(i + 1)).toISOString(),
       })),
+      // Two results as they look once brought in from the old app.
+      { id: 'old1', draw_date: '2025-12-20', status: 'completed', winning_number: 47, winner_name: 'Kev', amount_won: 80, rollover_amount: 0, completed_at: '2025-12-20T20:00:00Z' },
+      { id: 'old0', draw_date: '2025-12-13', status: 'completed', winning_number: 59, winner_name: null, amount_won: 0, rollover_amount: 0, completed_at: '2025-12-13T20:00:00Z' },
     ],
     members: [
       { id: 'demo-user', email: myEmail, full_name: 'Sam' },
