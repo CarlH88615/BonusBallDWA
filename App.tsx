@@ -1559,11 +1559,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  // The top of the app takes the colour of the signed-in person's first ball.
+  // The top of the app takes the colour of the signed-in person's ball. White balls (1-9)
+  // have no colour to give, so with several balls we use the first coloured one, and
+  // fall back to the house blue when every ball is white.
   const me = (() => {
-    const n = myBalls[0]?.number;
-    if (!n) return { bg: '#1f6fd0', fg: '#ffffff' };
-    if (n <= 9) return { bg: '#14161c', fg: '#ffffff' };
+    const n = (myBalls.find((b) => b.number > 9) ?? myBalls[0])?.number;
+    if (!n || n <= 9) return { bg: '#1f6fd0', fg: '#ffffff' };
     if (n <= 19) return { bg: '#005eb8', fg: '#ffffff' };
     if (n <= 29) return { bg: '#e4007f', fg: '#ffffff' };
     if (n <= 39) return { bg: '#009639', fg: '#ffffff' };
@@ -1698,13 +1699,24 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
   const enableNotifications = async () => {
     try {
+      if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
+        showToast('error', 'On iPhone, add the app to your Home Screen first, then try again.');
+        return;
+      }
+      if (!VAPID_PUBLIC_KEY) {
+        showToast('error', "Notifications aren't set up on the site yet. Carl needs to add the key in Netlify.");
+        return;
+      }
       const perm = await Notification.requestPermission();
       if (perm !== 'granted') {
         showToast('error', 'Notifications are blocked for this site.');
         return;
       }
+      // iPhones only accept the key as bytes, so decode the base64url string first.
+      const b64 = (VAPID_PUBLIC_KEY + '='.repeat((4 - (VAPID_PUBLIC_KEY.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+      const keyBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: VAPID_PUBLIC_KEY });
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes });
       const { data: { user }, error: userErr } = await supabase.auth.getUser();
       if (userErr || !user) {
         showToast('error', 'Not logged in.');
