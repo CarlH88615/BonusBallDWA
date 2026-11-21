@@ -1427,8 +1427,11 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       );
     }
     return (
-      <div className={`${cls} ${status === 'out' ? 'grayscale opacity-55' : ''}`}>
-        <LotteryBall number={num} hideShadow className="w-full h-full" />
+      // Unpaid: faded, with a dashed ring so it can't be mistaken for a white ball.
+      <div className={`${cls} ${status === 'out' ? 'rounded-full outline-dashed outline-2 outline-[#7d8696]' : ''}`}>
+        <div className={status === 'out' ? 'grayscale opacity-40' : ''}>
+          <LotteryBall number={num} hideShadow className="w-full h-full" />
+        </div>
       </div>
     );
   };
@@ -2156,7 +2159,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       );
                     })}
                   </div>
-                  <p className={`text-xs ${UI.dim}`}>Colour means in. Grey means not paid. Dotted means free. Tap any ball to see whose it is.</p>
+                  <p className={`text-xs ${UI.dim}`}>Colour means in. Faded with a dashed ring means not paid. Dotted means free. Tap any ball to see whose it is.</p>
                 </section>
 
                 {/* WINNERS */}

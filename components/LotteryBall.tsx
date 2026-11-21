@@ -31,6 +31,8 @@ export const LotteryBall: React.FC<BallProps> = ({
   showNumber = true
 }) => {
   const styles = getBallStyles(number);
+  // White balls need much lighter shading, or the shadows turn them grey.
+  const isWhite = styles.bg === '#ffffff';
   const displayNum = number < 10 ? `0${number}` : number.toString();
 
   return (
@@ -54,9 +56,11 @@ export const LotteryBall: React.FC<BallProps> = ({
           backgroundColor: styles.bg,
           backgroundImage: `
             radial-gradient(circle at 35% 35%, rgba(255,255,255,0.6) 0%, transparent 50%),
-            radial-gradient(circle at 50% 50%, transparent 60%, rgba(0,0,0,0.4) 100%)
+            radial-gradient(circle at 50% 50%, transparent 60%, rgba(0,0,0,${isWhite ? 0.1 : 0.4}) 100%)
           `,
-          boxShadow: `inset -6px -6px 15px rgba(0,0,0,0.4), inset 6px 6px 15px rgba(255,255,255,0.2)`
+          boxShadow: isWhite
+            ? `inset -4px -4px 10px rgba(0,0,0,0.12), inset 0 0 0 1px rgba(0,0,0,0.14)`
+            : `inset -6px -6px 15px rgba(0,0,0,0.4), inset 6px 6px 15px rgba(255,255,255,0.2)`
         }}
       >
         {/* Specular Shine Overlay */}
