@@ -1,10 +1,10 @@
 {
-  "name": "Charity Bonus Ball",
+  "name": "Bonus Ball",
   "short_name": "Bonus Ball",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#ec4899",
+  "background_color": "#f1f3f7",
+  "theme_color": "#f1f3f7",
   "icons": [
     {
       "src": "/icons/icon-192.png",

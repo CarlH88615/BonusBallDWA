@@ -4,17 +4,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Charity Bonus Ball | In Memory of Emmie-Rose</title>
+    <title>Bonus Ball</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#ec4899" />
+    <meta name="theme-color" content="#f1f3f7" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Bonus Ball+" />
+    <meta name="apple-mobile-web-app-title" content="Bonus Ball" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&family=Space+Grotesk:wght@300;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     <script type="importmap">
     {
       "imports": {
@@ -26,34 +26,27 @@
     }
     </script>
     <style>
-      :root {
-        --deep-bg: #03050a;
-        --gold: #ffd700;
-        --gold-glow: rgba(255, 215, 0, 0.2);
-      }
       body {
         margin: 0;
-        background-color: var(--deep-bg);
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        color: #fff;
+        background-color: #f1f3f7;
+        font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        color: #14161c;
         overflow-x: hidden;
+        -webkit-tap-highlight-color: transparent;
       }
-      .font-display {
-        font-family: 'Space Grotesk', sans-serif;
+      /* Drifting balls on the sign-in screen. CSS only, so they cost nothing while idle. */
+      .login-ball {
+        position: absolute;
+        opacity: 0.35;
+        animation: loginDrift 9s ease-in-out infinite;
+        pointer-events: none;
       }
-      @keyframes pulseSize {
-        0%, 100% { transform: scale(1.1); }
-        50% { transform: scale(0.85); }
+      @keyframes loginDrift {
+        0%, 100% { transform: translate(0, 0) rotate(0deg); }
+        50% { transform: translate(-14px, 18px) rotate(25deg); }
       }
-      .animate-pulse-size {
-        animation: pulseSize 2s ease-in-out infinite;
-      }
-      @keyframes spin-slow {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-      }
-      .animate-spin-slow {
-        animation: spin-slow 15s linear infinite;
+      @media (prefers-reduced-motion: reduce) {
+        .login-ball { animation: none; }
       }
     </style>
 </head>
