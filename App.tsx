@@ -2074,7 +2074,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                           <div key={r.id} className="flex items-center gap-3">
                             <LotteryBall number={Number(r.winning_number)} hideShadow className="w-10 h-10 flex-none" />
                             <div className="flex-1 min-w-0">
-                              <p className="font-bold truncate">{r.winner_name ?? 'Rolled over'}</p>
+                              <p className="font-bold truncate">{r.winner_name ?? (Number(r.rollover_amount) > 0 ? 'Rolled over' : 'No winner')}</p>
                               <p className={`text-xs ${UI.dim}`}>{drawDayLabel(r.draw_date)}</p>
                             </div>
                             {r.winner_name && <p className="font-extrabold tabular-nums">£{r.amount_won}</p>}

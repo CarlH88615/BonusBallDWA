@@ -38,6 +38,7 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers }) => {
     });
     const mostWins = [...byName.entries()].sort((a, b) => b[1].wins - a[1].wins || b[1].total - a[1].total)[0];
     const biggest = [...paid].sort((a, b) => Number(b.amount_won) - Number(a.amount_won))[0];
+    const paidOut = paid.reduce((sum, r) => sum + Number(r.amount_won), 0);
 
     // Longest wait: of the people who own a ball today, who has gone most draws without a win.
     const owners = [...new Set(balls.map((b) => b?.owner).filter(Boolean))] as string[];
@@ -51,7 +52,7 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers }) => {
     const drawn = new Set(byBall.keys());
     const never = Array.from({ length: 59 }, (_, i) => i + 1).filter((n) => !drawn.has(n));
     const mineNever = myNumbers.filter((n) => never.includes(n));
-    return { count: draws.length, luckiest, mostWins, biggest, longest: longest as { name: string; draws: number; never: boolean } | null, never, mineNever };
+    return { count: draws.length, luckiest, mostWins, biggest, longest: longest as { name: string; draws: number; never: boolean } | null, never, mineNever, first: draws[draws.length - 1].draw_date as string, paidOut, paidCount: paid.length };
   }, [winners, balls, myNumbers]);
 
   if (!stats) return null;
@@ -70,6 +71,9 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers }) => {
         <h2 className="font-extrabold">Bragging rights</h2>
         <span className={`text-sm font-semibold ${dim}`}>{stats.count} draws so far</span>
       </div>
+      {stats.paidOut > 0 && (
+        <Row icon={badge('£', 'bg-[#1f9d55] text-white')} title="Total paid out" sub={`${stats.paidCount} ${stats.paidCount === 1 ? 'win' : 'wins'} since ${dayLabel(stats.first)}`} value={`£${stats.paidOut.toLocaleString('en-GB')}`} />
+      )}
       {stats.luckiest && stats.luckiest[1] > 1 && (
         <Row icon={<LotteryBall number={stats.luckiest[0]} hideShadow className="w-full h-full" />} title="Luckiest ball" sub={`${stats.luckiest[0]} has come up ${stats.luckiest[1]} times`} value={`×${stats.luckiest[1]}`} />
       )}
