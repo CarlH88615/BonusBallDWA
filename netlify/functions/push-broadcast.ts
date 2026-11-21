@@ -17,7 +17,7 @@ export const handler: Handler = async (event) => {
       return { statusCode: 405, body: "Method Not Allowed" };
     }
 
-    const { title, body, target } = JSON.parse(event.body || "{}");
+    const { title, body, target, userId } = JSON.parse(event.body || "{}");
     if (!title || !body) {
       return { statusCode: 400, body: "Missing title/body" };
     }
@@ -73,6 +73,11 @@ export const handler: Handler = async (event) => {
       subsQuery = subsQuery.in("user_id", unpaidUserIds);
     }
 
+    // A test send goes only to one person's own devices.
+    if (userId) {
+      subsQuery = subsQuery.eq("user_id", userId);
+    }
+
     const { data, error } = await subsQuery;
 
     if (error) {
@@ -113,10 +118,21 @@ export const handler: Handler = async (event) => {
 
     const ok = results.filter((r) => r.status === "fulfilled").length;
     const fail = results.length - ok;
+    // Say why each failure happened (push service + its status code), so problems can be
+    // diagnosed from the app instead of the function logs.
+    const failures = results
+      .map((r, i) => ({ r, s: subs[i] }))
+      .filter(({ r }) => r.status === "rejected")
+      .map(({ r, s }) => {
+        const err: any = (r as PromiseRejectedResult).reason;
+        let host = "";
+        try { host = new URL(s.endpoint).host; } catch { /* ignore */ }
+        return { service: host, status: err?.statusCode ?? null, reason: String(err?.body ?? err?.message ?? "").slice(0, 160) };
+      });
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ sent: ok, failed: fail, total: results.length }),
+      body: JSON.stringify({ sent: ok, failed: fail, total: results.length, failures }),
       headers: { "content-type": "application/json" },
     };
   } catch (e: any) {

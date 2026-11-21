@@ -232,7 +232,7 @@ const App: React.FC = () => {
   const showToast = (kind: 'error' | 'success' | 'info', message: string) => {
     setToast({ kind, message });
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 3500);
+    toastTimer.current = setTimeout(() => setToast(null), kind === 'error' ? 8000 : 3500);
   };
   const [blastMessage, setBlastMessage] = useState('');
   const [blastTarget, setBlastTarget] = useState<'all' | 'unpaid' | 'specific'>('all');
@@ -344,6 +344,7 @@ const isAdmin = useMemo(() => {
       console.error("❌ Failed to reload ledger", error);
       return;
     }
+    setLedgerLoaded(true);
     setLedgerRows(data ?? []);
   };
 
@@ -1304,17 +1305,34 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
   };
 
   // Real web-push to subscribers. Returns true on success.
+  const lastPushRef = useRef<{ sent: number; failed: number } | null>(null);
+  const pushSummary = () => {
+    const r = lastPushRef.current;
+    if (!r) return 'Sent.';
+    return `Sent to ${r.sent} phone${r.sent === 1 ? '' : 's'}${r.failed ? ` (${r.failed} didn't go through)` : ''}.`;
+  };
   const fireRealPush = async (title: string, body: string, target: string): Promise<boolean> => {
+    lastPushRef.current = null;
+    // Give up after 20 seconds so a bad signal can't leave the button stuck on "Sending…".
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
     try {
       const res = await fetch("/.netlify/functions/push-broadcast", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title, body, target }),
+        signal: controller.signal,
       });
+      if (res.ok) {
+        const info = await res.json().catch(() => null);
+        if (info && typeof info.sent === 'number') lastPushRef.current = { sent: info.sent, failed: Number(info.failed) || 0 };
+      }
       return res.ok;
     } catch (e) {
       console.error("Push broadcast failed", e);
       return false;
+    } finally {
+      clearTimeout(timer);
     }
   };
 
@@ -1530,6 +1548,8 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
   const [ballFilter, setBallFilter] = useState<'all' | 'unpaid' | 'free'>('all');
   const [showAllWinners, setShowAllWinners] = useState(false);
   const [remindArmed, setRemindArmed] = useState(false);
+  // Until the ledger has loaded we can't say whether the books balance, so say nothing.
+  const [ledgerLoaded, setLedgerLoaded] = useState(false);
 
   // The money tab needs the ledger to say whether the books balance.
   useEffect(() => {
@@ -1686,7 +1706,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     }
     setRemindArmed(false);
     const ok = await fireRealPush('Bonus Ball', "Your ball isn't paid for Saturday's draw yet. Pay Carl to be in.", 'unpaid');
-    showToast(ok ? 'success' : 'error', ok ? 'Reminder sent to everyone not paid.' : 'Reminder failed to send.');
+    showToast(ok ? 'success' : 'error', ok ? `Reminder: ${pushSummary()}` : "Couldn't send the reminder. Check your signal and try again.");
   };
 
   const signOut = async () => {
@@ -1755,14 +1775,34 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     showToast('success', 'User ID copied.');
   };
 
+  // Sends only to the signed-in person's own devices, and says why if it fails.
   const sendTestPush = async () => {
-    const res = await fetch('/.netlify/functions/push-broadcast', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: 'Test Push', body: 'Hello from Bonus Ball' }),
-    });
-    const text = await res.text();
-    showToast(res.ok ? 'success' : 'error', text);
+    const { data } = await supabase.auth.getUser();
+    const userId = data.user?.id;
+    if (!userId) {
+      showToast('error', 'Not logged in.');
+      return;
+    }
+    try {
+      const res = await fetch('/.netlify/functions/push-broadcast', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Bonus Ball test', body: 'Notifications are working on this phone.', userId }),
+      });
+      const text = await res.text();
+      let j: any = null;
+      try { j = JSON.parse(text); } catch { /* plain text */ }
+      if (!res.ok || !j) { showToast('error', text.slice(0, 160) || 'Test failed.'); return; }
+      if (j.total === 0) { showToast('error', 'This login has no phone signed up. Tap your initial, then Turn on notifications.'); return; }
+      if (j.failed > 0) {
+        const f = j.failures?.[0];
+        showToast('error', `Sent to ${j.sent} of ${j.total} of your devices. Failed: ${f?.service ?? ''} ${f?.status ?? ''} ${f?.reason ?? ''}`.trim());
+        return;
+      }
+      showToast('success', `Sent to ${j.sent} of your device${j.sent === 1 ? '' : 's'}. It should arrive in a few seconds.`);
+    } catch (err: any) {
+      showToast('error', err?.message ?? 'Test failed.');
+    }
   };
 
   const sendBroadcast = async () => {
@@ -1825,7 +1865,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     try {
       if (deliveryMode === 'push') {
         const ok = await fireRealPush(title, body, blastTarget);
-        showToast(ok ? 'success' : 'error', ok ? 'Message sent.' : 'Message failed to send.');
+        showToast(ok ? 'success' : 'error', ok ? pushSummary() : "Couldn't send. Check your signal and try again.");
       } else {
         addInAppNotification(title, body, blastTarget, 'blast');
         showToast('success', 'Added to the in-app inbox.');
@@ -2188,7 +2228,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       <div className="bg-white p-3"><p className="text-xl font-extrabold tabular-nums">{paidCount}/59</p><p className={`text-xs font-semibold ${UI.dim}`}>Paid in</p></div>
                       <button className="bg-white p-3 text-left" onClick={() => setAdminTab('money')}>
                         <p className="text-xl font-extrabold tabular-nums">£{bankBalance}</p>
-                        <p className={`text-xs font-bold ${booksOk ? 'text-green-700' : 'text-red-600'}`}>{booksOk ? 'Bank ✓' : 'Bank: check'}</p>
+                        <p className={`text-xs font-bold ${!ledgerLoaded ? 'text-[#5a6270]' : booksOk ? 'text-green-700' : 'text-red-600'}`}>{!ledgerLoaded ? 'Bank' : booksOk ? 'Bank ✓' : 'Bank: check'}</p>
                       </button>
                     </div>
 
@@ -2333,10 +2373,10 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     <div className={UI.card}>
                       <p className={UI.label}>In the bank</p>
                       <p className="text-5xl font-extrabold tracking-tight tabular-nums">£{Number(bankBalance).toFixed(2)}</p>
-                      <span className={`inline-block mt-2 rounded-full px-3 py-1 text-sm font-bold ${booksOk ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'}`}>{booksOk ? 'Books balance' : "Books don't balance"}</span>
+                      <span className={`inline-block mt-2 rounded-full px-3 py-1 text-sm font-bold ${!ledgerLoaded ? 'bg-[#e9ecf2] text-[#5a6270]' : booksOk ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'}`}>{!ledgerLoaded ? 'Checking the books…' : booksOk ? 'Books balance' : "Books don't balance"}</span>
                       <dl className="mt-4 text-sm space-y-1.5">
                         <div className="flex justify-between"><dt className={UI.dim}>Prepaid weeks + rollover should be</dt><dd className={`font-bold tabular-nums ${Math.abs(bankBalance - expectedBankTotal) < 0.01 ? '' : 'text-red-600'}`}>£{Number(expectedBankTotal).toFixed(2)}</dd></div>
-                        <div className="flex justify-between"><dt className={UI.dim}>Ledger adds up to</dt><dd className={`font-bold tabular-nums ${Math.abs(bankBalance - ledgerNet) < 0.01 ? '' : 'text-red-600'}`}>£{Number(ledgerNet).toFixed(2)}</dd></div>
+                        <div className="flex justify-between"><dt className={UI.dim}>Ledger adds up to</dt><dd className={`font-bold tabular-nums ${!ledgerLoaded || Math.abs(bankBalance - ledgerNet) < 0.01 ? '' : 'text-red-600'}`}>{ledgerLoaded ? `£${Number(ledgerNet).toFixed(2)}` : '…'}</dd></div>
                         <div className="flex justify-between"><dt className={UI.dim}>Rolled over into this pot</dt><dd className="font-bold tabular-nums">£{Number(totalRollover).toFixed(2)}</dd></div>
                       </dl>
                     </div>
@@ -2469,7 +2509,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                       })}
                     </div>
                     <div className={UI.card + ' flex items-center gap-3'}>
-                      <div className="flex-1"><p className="font-bold">Send a test notification</p><p className={`text-xs ${UI.dim}`}>Goes to everyone with notifications on, not just you.</p></div>
+                      <div className="flex-1"><p className="font-bold">Send a test notification</p><p className={`text-xs ${UI.dim}`}>Goes only to your own phone.</p></div>
                       <button className={UI.ghost} onClick={sendTestPush}>Send</button>
                     </div>
                     <div className={UI.card + ' flex items-center gap-3'}>
