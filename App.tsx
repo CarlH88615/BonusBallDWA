@@ -1,7 +1,8 @@
 // gitupdate 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LotteryBall } from './components/LotteryBall';
-import { ScratchReveal } from './components/ScratchReveal';
+import { Reveal, REVEAL_KINDS } from './components/Reveal';
+import type { RevealKind } from './components/Reveal';
 import { supabase, DEMO_ROLE, DEMO_ADMIN_EMAIL } from "./services/supabase";
 import type { BallState, NotificationMessage, Tab, AuthMode } from './types';
 
@@ -62,42 +63,29 @@ const App: React.FC = () => {
   const [resultBallNum, setResultBallNum] = useState('');
   const [paymentWeeks, setPaymentWeeks] = useState('1');
   
-  type RevealStyle = 'scratch' | 'slot' | 'bingo' | 'tile' | 'curtain';
-  const REVEAL_STYLES: { value: RevealStyle; label: string }[] = [
-    { value: 'scratch', label: 'Scratch Off' },
-    { value: 'slot', label: 'Slot Machine' },
-    { value: 'bingo', label: 'Bingo Eliminate' },
-    { value: 'tile', label: 'Tile Flip' },
-    { value: 'curtain', label: 'Stage Curtain' },
+  // 'random' picks a different reveal for each person each time ("Surprise me").
+  type RevealStyle = RevealKind | 'random';
+  const REVEAL_STYLES: { value: RevealStyle; label: string; desc: string }[] = [
+    ...REVEAL_KINDS.map((k) => ({ value: k.value as RevealStyle, label: k.label, desc: k.desc })),
+    { value: 'random', label: 'Surprise Me', desc: 'A different reveal for each person, each time' },
   ];
+  const isRevealStyle = (v: unknown): v is RevealStyle => REVEAL_STYLES.some((s) => s.value === v);
   const [revealDefaultStyle, setRevealDefaultStyle] = useState<RevealStyle>(() => {
     if (typeof window === 'undefined') return 'scratch';
     // v2 key: the redesign makes Scratch Off the default, ignoring any older saved choice.
     const saved = localStorage.getItem('reveal_default_style_v2');
-    if (saved === 'scratch' || saved === 'slot' || saved === 'bingo' || saved === 'tile' || saved === 'curtain') return saved;
-    return 'scratch';
+    return isRevealStyle(saved) ? saved : 'scratch';
   });
   const setAsDefaultStyle = (style: RevealStyle) => {
     localStorage.setItem('reveal_default_style_v2', style);
     setRevealDefaultStyle(style);
     showToast('success', `Default reveal set to ${REVEAL_STYLES.find((s) => s.value === style)?.label}`);
   };
-  // Per-draw override chosen in the Record Result modal. Empty string = use default.
+  // Per-draw override chosen when entering the result. Empty string = use default.
   const [recordRevealStyle, setRecordRevealStyle] = useState<RevealStyle | ''>('');
-  const [revealStyle, setRevealStyle] = useState<RevealStyle>('scratch');
-  const [revealRun, setRevealRun] = useState(0); // bumps on every play so Scratch Off remounts with fresh foil
+  const [revealStyle, setRevealStyle] = useState<RevealKind>('scratch'); // the one playing now
+  const [revealRun, setRevealRun] = useState(0); // bumps on every play so the reveal remounts fresh
   const [revealStep, setRevealStep] = useState<'idle' | 'running' | 'settled'>('idle');
-  // Per-style state. Each style only reads what it needs.
-  const [slotNumber, setSlotNumber] = useState<number>(1);
-  const [bingoGrid, setBingoGrid] = useState<Array<{ num: number; eliminated: boolean }>>([]);
-  const [bingoFinale, setBingoFinale] = useState<{
-    phase: 'idle' | 'rally' | 'shake3' | 'elim1' | 'shake2' | 'elim2' | 'crown';
-    finalists: number[]; // 3 ball numbers in randomised display order
-    winnerIdx: number;   // which display position holds the actual winner
-    elimOrder: number[]; // the two non-winner display indices, in elimination order
-  }>({ phase: 'idle', finalists: [], winnerIdx: -1, elimOrder: [] });
-  const [tileGrid, setTileGrid] = useState<Array<{ num: number; flipped: boolean; display: number }>>([]);
-  const [curtainPhase, setCurtainPhase] = useState<'closed' | 'shake' | 'opening' | 'open'>('closed');
   const revealRequestRef = useRef<number>(null);
   const revealTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -557,10 +545,8 @@ const isAdmin = useMemo(() => {
     const completed = (winnerRows ?? []).find((r: any) => r.winning_number);
     if (!completed) return null;
     const persistedStyle = (completed.reveal_style as RevealStyle | undefined) ?? null;
-    const styleForPlayback: RevealStyle =
-      persistedStyle === 'scratch' || persistedStyle === 'slot' || persistedStyle === 'bingo' || persistedStyle === 'tile' || persistedStyle === 'curtain'
-        ? persistedStyle
-        : revealDefaultStyle;
+    // Draws saved with one of the retired styles fall back to the default.
+    const styleForPlayback: RevealStyle = isRevealStyle(persistedStyle) ? persistedStyle : revealDefaultStyle;
     return {
       id: completed.id,
       date: completed.draw_date,
@@ -880,191 +866,15 @@ const isAdmin = useMemo(() => {
     revealTimeoutsRef.current = [];
   };
 
-  const startSlotReveal = (winNum: number, isRollover: boolean) => {
-    const total = 6500;
-    const start = performance.now();
-    let tickCount = 0;
-    const tick = () => {
-      const elapsed = performance.now() - start;
-      if (elapsed >= total) {
-        setSlotNumber(winNum);
-        setRevealStep('settled');
-        revealRequestRef.current = null;
-        playThunk();
-        setTimeout(() => (isRollover ? playSad() : playFanfare()), 250);
-        return;
-      }
-      const progress = elapsed / total;
-      const intervalMs = 50 + Math.pow(progress, 3) * 700;
-      if (total - elapsed < 600) {
-        const candidates = [winNum, winNum, ((winNum + 17) % 59) + 1, winNum];
-        setSlotNumber(candidates[Math.floor(elapsed / 150) % candidates.length]);
-      } else {
-        setSlotNumber(Math.floor(Math.random() * 59) + 1);
-      }
-      // Every 2nd tick to avoid audio overload at fast cycle speeds
-      if (tickCount % 2 === 0) playTick();
-      tickCount++;
-      const t = setTimeout(tick, intervalMs);
-      revealTimeoutsRef.current.push(t);
-    };
-    tick();
-  };
-
-  const startBingoReveal = (winNum: number, isRollover: boolean) => {
-    // Build the 59-ball grid in numerical order
-    const grid = Array.from({ length: 59 }, (_, i) => ({ num: i + 1, eliminated: false }));
-    setBingoGrid(grid);
-    setBingoFinale({ phase: 'idle', finalists: [] });
-
-    // Pick 2 random non-winners to be the other finalists; eliminate everyone else first.
-    const nonWinnerNums = grid.map((b) => b.num).filter((n) => n !== winNum);
-    const shuffled = [...nonWinnerNums].sort(() => Math.random() - 0.5);
-    const otherFinalists = shuffled.slice(0, 2);
-    const toEliminateInGrid = shuffled.slice(2); // 56 balls
-
-    // Phase 1: fast grid eliminations until only the 3 finalists remain.
-    let i = 0;
-    const eliminateOne = () => {
-      if (i >= toEliminateInGrid.length) {
-        // Hold for a beat, then transition into finale rally
-        const t = setTimeout(() => beginFinale(), 350);
-        revealTimeoutsRef.current.push(t);
-        return;
-      }
-      const targetNum = toEliminateInGrid[i];
-      setBingoGrid((prev) => prev.map((b) => (b.num === targetNum ? { ...b, eliminated: true } : b)));
-      // Subtle pop on each elimination — frequency varies for texture
-      playTone(280 + (targetNum * 7) % 200, 60, 0.10, 'triangle');
-      i++;
-      const remaining = toEliminateInGrid.length - i;
-      let delay: number;
-      if (i < 6) delay = 220 - i * 15;          // ease in
-      else if (remaining < 4) delay = 180 + (4 - remaining) * 90; // build tension as we approach finale
-      else delay = 50;                            // rip through the middle
-      const t = setTimeout(eliminateOne, delay);
-      revealTimeoutsRef.current.push(t);
-    };
-
-    const beginFinale = () => {
-      // Sort numerically so the winner's screen position varies naturally with their
-      // number — no positional tell. Randomise which of the two losers explodes first.
-      const finalists = [otherFinalists[0], otherFinalists[1], winNum].sort((a, b) => a - b);
-      const winnerIdx = finalists.indexOf(winNum);
-      const loserIdxs = [0, 1, 2].filter((i) => i !== winnerIdx);
-      const elimOrder = Math.random() < 0.5 ? loserIdxs : [loserIdxs[1], loserIdxs[0]];
-      setBingoFinale({ phase: 'rally', finalists, winnerIdx, elimOrder });
-      playWhoosh();
-      const tShake = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'shake3' })), 800);
-      const tElim1 = setTimeout(() => { setBingoFinale((s) => ({ ...s, phase: 'elim1' })); playExplosion(); }, 2200);
-      const tShake2 = setTimeout(() => setBingoFinale((s) => ({ ...s, phase: 'shake2' })), 3000);
-      const tElim2 = setTimeout(() => { setBingoFinale((s) => ({ ...s, phase: 'elim2' })); playExplosion(); }, 4400);
-      const tCrown = setTimeout(() => {
-        setBingoFinale((s) => ({ ...s, phase: 'crown' }));
-        setRevealStep('settled');
-        playThunk();
-        setTimeout(() => (isRollover ? playSad() : playFanfare()), 250);
-      }, 5300);
-      revealTimeoutsRef.current.push(tShake, tElim1, tShake2, tElim2, tCrown);
-    };
-
-    const first = setTimeout(eliminateOne, 600);
-    revealTimeoutsRef.current.push(first);
-  };
-
-  const startTileReveal = (winNum: number, isRollover: boolean) => {
-    const grid = Array.from({ length: 59 }, (_, i) => ({
-      num: i + 1,
-      flipped: false,
-      display: Math.floor(Math.random() * 59) + 1,
-    }));
-    setTileGrid(grid);
-    // Sweep flip in a wave: diagonal order
-    const order = grid
-      .map((_, i) => i)
-      .sort((a, b) => {
-        const ax = a % 10, ay = Math.floor(a / 10);
-        const bx = b % 10, by = Math.floor(b / 10);
-        return (ax + ay) - (bx + by) || a - b;
-      });
-    // Make sure winner is LAST to flip
-    const winnerIdx = winNum - 1;
-    const noWinner = order.filter((i) => i !== winnerIdx);
-    const sequence = [...noWinner, winnerIdx];
-    let i = 0;
-    const flipNext = () => {
-      if (i >= sequence.length) {
-        const t = setTimeout(() => {
-          setRevealStep('settled');
-          playThunk();
-          setTimeout(() => (isRollover ? playSad() : playFanfare()), 200);
-        }, 600);
-        revealTimeoutsRef.current.push(t);
-        return;
-      }
-      const target = sequence[i];
-      setTileGrid((prev) => prev.map((tile, idx) => (idx === target ? { ...tile, flipped: true } : tile)));
-      const remaining = sequence.length - i - 1;
-      // Sound: subtle click during fast burn, deeper thuds on the dramatic last few,
-      // and the winner flip is silent (the settle thunk + fanfare are the payoff).
-      if (i === sequence.length - 1) {
-        // winner flip — silence here, settle handles it
-      } else if (remaining < 4) playTone(440 - (4 - remaining) * 60, 90, 0.20, 'sine');
-      else playTick();
-      i++;
-      let delay: number;
-      if (remaining === 0) delay = 0;
-      else if (remaining === 1) delay = 1600;
-      else if (remaining === 2) delay = 1100;
-      else if (remaining === 3) delay = 800;
-      else if (remaining === 4) delay = 550;
-      else if (remaining === 5) delay = 350;
-      else if (remaining === 6) delay = 200;
-      else delay = 40;
-      const t = setTimeout(flipNext, delay);
-      revealTimeoutsRef.current.push(t);
-    };
-    const first = setTimeout(flipNext, 400);
-    revealTimeoutsRef.current.push(first);
-  };
-
-  const startCurtainReveal = (_winNum: number, isRollover: boolean) => {
-    setCurtainPhase('closed');
-    const t1 = setTimeout(() => setCurtainPhase('shake'), 200);
-    // Drum-roll: a series of low taps during the shake phase
-    const drumTimers: ReturnType<typeof setTimeout>[] = [];
-    for (let i = 0; i < 12; i++) {
-      drumTimers.push(setTimeout(() => playTone(120, 80, 0.25, 'square'), 300 + i * 180));
-    }
-    const t2 = setTimeout(() => { setCurtainPhase('opening'); playWhoosh(); }, 2400);
-    const t3 = setTimeout(() => {
-      setCurtainPhase('open');
-      setRevealStep('settled');
-      playThunk();
-      setTimeout(() => (isRollover ? playSad() : playFanfare()), 250);
-    }, 4400);
-    revealTimeoutsRef.current.push(t1, t2, t3, ...drumTimers);
-  };
-
   const startRevealSequence = (style: RevealStyle = 'scratch') => {
     if (!latestWin) return;
     cancelRevealAnimations();
+    const kind: RevealKind =
+      style === 'random' ? REVEAL_KINDS[Math.floor(Math.random() * REVEAL_KINDS.length)].value : style;
     setRevealRun((r) => r + 1);
-    setRevealStyle(style);
+    setRevealStyle(kind);
     setShowWinReveal(true);
     setRevealStep('running');
-    setSlotNumber(1);
-    setBingoGrid([]);
-    setBingoFinale({ phase: 'idle', finalists: [], winnerIdx: -1, elimOrder: [] });
-    setTileGrid([]);
-    setCurtainPhase('closed');
-    // Reset wheel rotation if it was previously animated
-    const winNum = latestWin!.ballNumber;
-    const isRollover = !!latestWin!.isRollover;
-    if (style === 'slot') startSlotReveal(winNum, isRollover);
-    else if (style === 'bingo') startBingoReveal(winNum, isRollover);
-    else if (style === 'tile') startTileReveal(winNum, isRollover);
-    else if (style === 'curtain') startCurtainReveal(winNum, isRollover);
   };
 
 const fetchScheduled = async () => {
@@ -1884,10 +1694,11 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
         </div>
       )}
 
-      {/* SCRATCH REVEAL — the default */}
-      {showWinReveal && revealStyle === 'scratch' && latestWin && (
-        <ScratchReveal
+      {/* THE REVEAL */}
+      {showWinReveal && latestWin && (
+        <Reveal
           key={`${latestWin.id}-${revealRun}`}
+          kind={revealStyle}
           ballNumber={latestWin.ballNumber}
           winner={latestWin.winner}
           prize={latestWin.prizeAmount}
@@ -1899,7 +1710,13 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
           fg={me.fg}
           muted={muted}
           onToggleMute={toggleMuted}
-          onScratchSound={playTick}
+          onSound={(kind, freq) => {
+            if (kind === 'tick') playTick();
+            else if (kind === 'pop') playExplosion();
+            else if (kind === 'whoosh') playWhoosh();
+            else if (kind === 'drum') playTone(120, 90, 0.25, 'square');
+            else playTone(freq ?? 440, 140, 0.15, 'triangle');
+          }}
           onRevealed={() => {
             setRevealStep('settled');
             playThunk();
@@ -1910,287 +1727,6 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
             else { cancelRevealAnimations(); setShowWinReveal(false); }
           }}
         />
-      )}
-
-      {/* CLASSIC REVEALS — still available from Admin, Settings */}
-      {showWinReveal && revealStyle !== 'scratch' && (
-        <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-black overflow-hidden">
-
-          {/* SLOT MACHINE — single big number cycling */}
-          {revealStyle === 'slot' && (
-            <div className="absolute inset-0 flex items-center justify-center px-4">
-              <div className="relative flex flex-col items-center max-w-full">
-                <p className={`text-[10px] md:text-[11px] font-black uppercase tracking-[0.5em] mb-6 md:mb-8 transition-colors ${revealStep === 'settled' ? 'text-yellow-400' : 'text-pink-500 animate-pulse'}`}>
-                  {revealStep === 'settled' ? '★ LOCKED IN ★' : 'Drawing'}
-                </p>
-                {/* Wrapper sized to the ball so rays scale relative to it (not the whole screen) */}
-                <div
-                  className={`relative transition-transform duration-700 ease-out ${revealStep === 'settled' ? 'scale-110 md:scale-[1.3] drop-shadow-[0_0_120px_rgba(250,204,21,0.7)]' : 'scale-100'}`}
-                  style={{ width: 'min(58vmin, 380px)', height: 'min(58vmin, 380px)' }}
-                >
-                  {/* Radiating rays sit behind the ball at 120% of its size */}
-                  {revealStep === 'settled' && (
-                    <div className="absolute -inset-[10%] rounded-full animate-slot-rays pointer-events-none" style={{ background: 'conic-gradient(from 0deg, transparent 0deg, rgba(250,204,21,0.25) 10deg, transparent 30deg, transparent 60deg, rgba(250,204,21,0.25) 70deg, transparent 90deg, transparent 120deg, rgba(250,204,21,0.25) 130deg, transparent 150deg, transparent 180deg, rgba(250,204,21,0.25) 190deg, transparent 210deg, transparent 240deg, rgba(250,204,21,0.25) 250deg, transparent 270deg, transparent 300deg, rgba(250,204,21,0.25) 310deg, transparent 330deg, transparent 360deg)' }} />
-                  )}
-                  <LotteryBall number={slotNumber} hideShadow={false} showNumber={true} className="w-full h-full" />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* BINGO ELIMINATION — phase 1: grid burn-down; phase 2: 3-ball finale showdown */}
-          {revealStyle === 'bingo' && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-8">
-              {bingoFinale.phase === 'idle' ? (
-                <>
-                  <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-4 md:mb-6">Burning the Field</p>
-                  <div className="grid grid-cols-8 gap-2 md:gap-3 w-full max-w-2xl px-2">
-                    {bingoGrid.map((b) => (
-                      <div
-                        key={b.num}
-                        className={`relative aspect-square flex items-center justify-center transition-all duration-500 ${
-                          b.eliminated ? 'opacity-0 scale-0 rotate-180' : 'opacity-100 scale-100'
-                        }`}
-                        style={{ transitionTimingFunction: b.eliminated ? 'cubic-bezier(0.4, 0, 1, 1)' : 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
-                      >
-                        <LotteryBall number={b.num} showNumber={true} className="w-full h-full" />
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* Big "FINAL 3" text that fades when we move to crowning */}
-                  <p className={`font-black uppercase tracking-[0.4em] mb-6 md:mb-12 transition-all duration-500 ${bingoFinale.phase === 'crown' ? 'opacity-0 text-yellow-400 text-2xl' : bingoFinale.phase === 'rally' ? 'text-pink-500 text-2xl md:text-4xl animate-pulse scale-110' : 'text-pink-500 text-xl md:text-3xl'}`}>
-                    {bingoFinale.phase === 'rally' ? '⚡ FINAL THREE ⚡' : bingoFinale.phase === 'shake3' ? 'Who Will It Be?' : bingoFinale.phase === 'elim1' || bingoFinale.phase === 'shake2' ? 'Down to Two…' : bingoFinale.phase === 'elim2' ? 'One Remains…' : ''}
-                  </p>
-                  <div className="flex items-center justify-center gap-3 sm:gap-6 md:gap-16 transition-all duration-700 px-4">
-                    {bingoFinale.finalists.map((num, idx) => {
-                      const isWinner = idx === bingoFinale.winnerIdx;
-                      const phase = bingoFinale.phase;
-                      const firstOut = bingoFinale.elimOrder[0];
-                      const secondOut = bingoFinale.elimOrder[1];
-                      const explodedOut = (idx === firstOut && (phase === 'elim1' || phase === 'shake2' || phase === 'elim2' || phase === 'crown'))
-                        || (idx === secondOut && (phase === 'elim2' || phase === 'crown'));
-                      const shaking =
-                        (phase === 'shake3') ||
-                        (phase === 'shake2' && idx !== firstOut);
-                      const crowned = phase === 'crown' && isWinner;
-                      const flashing =
-                        (idx === firstOut && phase === 'elim1') ||
-                        (idx === secondOut && phase === 'elim2');
-                      return (
-                        <div
-                          key={`${num}-${idx}`}
-                          className={`relative transition-all ease-out ${explodedOut ? 'duration-500 opacity-0 scale-0 rotate-[720deg]' : crowned ? 'duration-1000 scale-150 sm:scale-[1.7] md:scale-[1.8] drop-shadow-[0_0_80px_rgba(250,204,21,0.95)]' : 'duration-300 opacity-100 scale-100'} ${shaking ? 'animate-finalist-shake' : ''} ${flashing ? 'animate-finalist-flash' : ''}`}
-                          style={{ width: 'min(26vw, 224px)', height: 'min(26vw, 224px)' }}
-                        >
-                          <LotteryBall number={num} showNumber={true} className="w-full h-full" />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* TILE FLIP — 59 face-down cards flip in sequence */}
-          {revealStyle === 'tile' && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-8">
-              <p className="text-[11px] font-black uppercase tracking-[0.5em] text-pink-500 mb-4 md:mb-6">Turn Them Over</p>
-              <div className="grid grid-cols-8 gap-2 md:gap-3 w-full max-w-2xl px-2">
-                {tileGrid.map((tile) => {
-                  const isWinner = tile.num === latestWin?.ballNumber;
-                  const showFace = tile.flipped;
-                  // Winner card grows dramatically once the reveal settles
-                  const winnerSettled = isWinner && showFace && revealStep === 'settled';
-                  return (
-                    <div key={tile.num} className={`relative aspect-square transition-all duration-700 ease-out ${winnerSettled ? 'scale-[2.4] z-20 drop-shadow-[0_0_60px_rgba(250,204,21,0.9)]' : 'scale-100'}`} style={{ perspective: '800px' }}>
-                      <div
-                        className="absolute inset-0 transition-transform duration-500 ease-out"
-                        style={{ transformStyle: 'preserve-3d', transform: showFace ? 'rotateY(180deg)' : 'rotateY(0)' }}
-                      >
-                        {/* back */}
-                        <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-gradient-to-br from-pink-500/20 to-pink-500/5 border border-pink-500/30 text-pink-400/80 font-black text-xl md:text-2xl" style={{ backfaceVisibility: 'hidden' }}>?</div>
-                        {/* front — real lottery ball */}
-                        <div
-                          className={`absolute inset-0 flex items-center justify-center rounded-xl ${isWinner && showFace ? 'bg-yellow-400/20 ring-4 ring-yellow-400 shadow-[0_0_30px_rgba(250,204,21,0.8)]' : ''}`}
-                          style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
-                        >
-                          <LotteryBall number={tile.num} showNumber={true} hideShadow={true} className="w-full h-full" />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* STAGE CURTAINS — drape opens, ball zooms in, confetti rains */}
-          {revealStyle === 'curtain' && (
-            <div className="absolute inset-0 overflow-hidden">
-              {/* The revealed ball behind the curtains — zooms in dramatically when curtains open */}
-              <div className={`absolute inset-0 flex items-center justify-center px-4 transition-all ease-out ${curtainPhase === 'open' ? 'opacity-100 scale-100 duration-1000' : 'opacity-0 scale-50 duration-300'}`}>
-                <div style={{ width: 'min(65vmin, 28rem)', height: 'min(65vmin, 28rem)' }} className="flex items-center justify-center">
-                  <LotteryBall
-                    number={latestWin?.ballNumber ?? 1}
-                    showNumber={true}
-                    className="w-full h-full drop-shadow-[0_0_80px_rgba(250,204,21,0.8)]"
-                  />
-                </div>
-              </div>
-              {/* Confetti — 40 pieces falling with random colours and delays */}
-              {curtainPhase === 'open' && (
-                <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden">
-                  {Array.from({ length: 40 }).map((_, i) => {
-                    const colors = ['#ec4899', '#f97316', '#facc15', '#22c55e', '#06b6d4', '#a855f7', '#ffffff'];
-                    const color = colors[i % colors.length];
-                    const left = Math.random() * 100;
-                    const delay = Math.random() * 0.6;
-                    const duration = 2.5 + Math.random() * 1.5;
-                    const drift = (Math.random() - 0.5) * 80;
-                    const size = 8 + Math.random() * 10;
-                    const shape = i % 2 === 0 ? '0' : '50%';
-                    return (
-                      <div
-                        key={i}
-                        className="absolute top-0 animate-confetti-fall"
-                        style={{
-                          left: `${left}%`,
-                          width: `${size}px`,
-                          height: `${size * 0.4}px`,
-                          background: color,
-                          borderRadius: shape,
-                          animationDelay: `${delay}s`,
-                          animationDuration: `${duration}s`,
-                          ['--drift' as any]: `${drift}px`,
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-              {/* Left curtain */}
-              <div
-                className={`absolute top-0 bottom-0 left-0 w-1/2 z-10 shadow-[0_0_60px_rgba(0,0,0,0.6)] transition-transform ${curtainPhase === 'opening' || curtainPhase === 'open' ? 'duration-[2000ms] -translate-x-full ease-in-out' : curtainPhase === 'shake' ? 'animate-curtain-shake-l' : ''}`}
-                style={{ background: 'repeating-linear-gradient(90deg, #7f1d1d 0, #991b1b 16px, #7f1d1d 32px), linear-gradient(to right, #450a0a, #991b1b)' }}
-              />
-              {/* Right curtain */}
-              <div
-                className={`absolute top-0 bottom-0 right-0 w-1/2 z-10 shadow-[0_0_60px_rgba(0,0,0,0.6)] transition-transform ${curtainPhase === 'opening' || curtainPhase === 'open' ? 'duration-[2000ms] translate-x-full ease-in-out' : curtainPhase === 'shake' ? 'animate-curtain-shake-r' : ''}`}
-                style={{ background: 'repeating-linear-gradient(90deg, #7f1d1d 0, #991b1b 16px, #7f1d1d 32px), linear-gradient(to left, #450a0a, #991b1b)' }}
-              />
-              {/* Building-tension label while closed */}
-              {curtainPhase !== 'open' && (
-                <p className="absolute bottom-[15vh] left-0 w-full text-center text-yellow-400 font-black uppercase tracking-[0.5em] text-xs md:text-sm animate-pulse z-20">And the winner is…</p>
-              )}
-            </div>
-          )}
-
-          {/* SHARED CONFETTI — fires for every style on settle (except curtain which has its own). */}
-          {revealStep === 'settled' && revealStyle !== 'curtain' && (
-            <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
-              {Array.from({ length: 50 }).map((_, i) => {
-                const colors = ['#ec4899', '#f97316', '#facc15', '#22c55e', '#06b6d4', '#a855f7', '#ffffff'];
-                const color = colors[i % colors.length];
-                const left = Math.random() * 100;
-                const delay = Math.random() * 0.8;
-                const duration = 2.5 + Math.random() * 1.5;
-                const drift = (Math.random() - 0.5) * 100;
-                const size = 8 + Math.random() * 10;
-                const shape = i % 2 === 0 ? '0' : '50%';
-                return (
-                  <div
-                    key={i}
-                    className="absolute top-0 animate-confetti-fall"
-                    style={{
-                      left: `${left}%`,
-                      width: `${size}px`,
-                      height: `${size * 0.4}px`,
-                      background: color,
-                      borderRadius: shape,
-                      animationDelay: `${delay}s`,
-                      animationDuration: `${duration}s`,
-                      ['--drift' as any]: `${drift}px`,
-                    }}
-                  />
-                );
-              })}
-            </div>
-          )}
-
-          {/* MUTE TOGGLE — top-right of modal, always visible */}
-          <button
-            onClick={toggleMuted}
-            aria-label={muted ? 'Unmute' : 'Mute'}
-            className="absolute top-4 right-4 z-[60] w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all"
-          >
-            {muted ? (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l4-4m0 4l-4-4" /></svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
-            )}
-          </button>
-
-          {/* SHARED NAMEPLATE — branches on rollover vs paid winner */}
-          <div className={`absolute bottom-[6vh] left-0 w-full text-center transition-all duration-700 delay-300 pointer-events-auto z-[50] ${revealStep === 'settled' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
-            {latestWin?.isRollover ? (
-              <>
-                <p className="text-orange-400 font-black uppercase tracking-[0.5em] text-xs md:text-sm mb-2 animate-pulse">🔥 Rollover Active 🔥</p>
-                <p className="text-pink-500 font-black uppercase tracking-[0.5em] text-[10px] mb-3">Saturday Draw</p>
-                <h2 className="text-4xl md:text-6xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">No Paid Winner</h2>
-                <p className="text-orange-400 font-black text-lg md:text-2xl tracking-tighter">£{latestWin?.rolloverAmount || 0} rolls into next week</p>
-                <div className="mt-6">
-                  <button onClick={dismissReveal} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="text-yellow-400 font-black uppercase tracking-[0.5em] text-xs md:text-sm mb-2 animate-pulse">🎉 Congratulations 🎉</p>
-                <p className="text-pink-500 font-black uppercase tracking-[0.5em] text-[10px] mb-3">Saturday Draw Winner</p>
-                <h2 className="text-4xl md:text-7xl font-black text-white tracking-tighter uppercase leading-none mb-2 drop-shadow-2xl">{latestWin?.winner}</h2>
-                <p className="text-yellow-400 font-black text-2xl md:text-5xl tracking-tighter drop-shadow-xl">£{latestWin?.prizeAmount || 0}</p>
-                <div className="mt-6">
-                  <button onClick={dismissReveal} className="px-10 py-4 bg-white text-black font-black uppercase text-[10px] tracking-[0.2em] rounded-full hover:bg-pink-500 hover:text-white transition-all shadow-2xl active:scale-95">Open Dashboard</button>
-                </div>
-              </>
-            )}
-          </div>
-
-          <style dangerouslySetInnerHTML={{ __html: `
-            @keyframes curtainShakeL { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 50% { transform: translateX(2px); } 75% { transform: translateX(-2px); } }
-            @keyframes curtainShakeR { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(3px); } 50% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
-            .animate-curtain-shake-l { animation: curtainShakeL 0.15s ease-in-out infinite; }
-            .animate-curtain-shake-r { animation: curtainShakeR 0.15s ease-in-out infinite; }
-            @keyframes confettiFall {
-              0%   { transform: translate3d(0, -10vh, 0) rotate(0deg); opacity: 1; }
-              100% { transform: translate3d(var(--drift, 0px), 110vh, 0) rotate(720deg); opacity: 0.8; }
-            }
-            .animate-confetti-fall { animation: confettiFall linear forwards; }
-            @keyframes finalistShake {
-              0%, 100% { transform: translateX(0) translateY(0) rotate(0); }
-              10%      { transform: translateX(-6px) translateY(-2px) rotate(-3deg); }
-              25%      { transform: translateX(7px) translateY(2px) rotate(3deg); }
-              40%      { transform: translateX(-5px) translateY(0) rotate(-2deg); }
-              55%      { transform: translateX(6px) translateY(-3px) rotate(2deg); }
-              70%      { transform: translateX(-4px) translateY(2px) rotate(-2deg); }
-              85%      { transform: translateX(3px) translateY(0) rotate(1deg); }
-            }
-            .animate-finalist-shake { animation: finalistShake 0.4s ease-in-out infinite; }
-            @keyframes finalistFlash {
-              0%, 100% { filter: drop-shadow(0 0 0 rgba(239,68,68,0)); }
-              50%      { filter: drop-shadow(0 0 50px rgba(239,68,68,0.95)); transform: scale(1.15); }
-            }
-            .animate-finalist-flash { animation: finalistFlash 0.3s ease-in-out infinite; }
-            @keyframes slotRays {
-              from { transform: rotate(0deg); }
-              to   { transform: rotate(360deg); }
-            }
-            .animate-slot-rays { animation: slotRays 6s linear infinite; }
-          ` }} />
-        </div>
       )}
 
       {isLoggedIn ? (
@@ -2488,18 +2024,12 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
                     <div className={UI.card + ' space-y-3'}>
                       <h3 className="font-extrabold">Reveal style</h3>
                       {!latestWin && <p className={`text-sm ${UI.dim}`}>Record a draw first to preview these.</p>}
-                      {([
-                        { value: 'scratch', desc: 'Scratch the gold off the ball with your finger' },
-                        { value: 'bingo', desc: 'All 59 balls knocked out down to a final three' },
-                        { value: 'slot', desc: 'One big number spins and slows' },
-                        { value: 'tile', desc: 'Tiles flip over, winner last' },
-                        { value: 'curtain', desc: 'Red curtains shake, then part' },
-                      ] as { value: RevealStyle; desc: string }[]).map((opt) => {
+                      {REVEAL_STYLES.map((opt) => {
                         const isDefault = revealDefaultStyle === opt.value;
                         return (
                           <div key={opt.value} className="flex items-center gap-2">
                             <div className="flex-1 min-w-0">
-                              <p className="font-bold">{REVEAL_STYLES.find((s) => s.value === opt.value)?.label}{isDefault && <span className="ml-2 text-xs font-bold bg-[#14161c] text-white rounded-full px-2 py-0.5">Default</span>}</p>
+                              <p className="font-bold">{opt.label}{isDefault && <span className="ml-2 text-xs font-bold bg-[#14161c] text-white rounded-full px-2 py-0.5">Default</span>}</p>
                               <p className={`text-xs ${UI.dim}`}>{opt.desc}</p>
                             </div>
                             <button className={UI.ghost + ' px-3'} disabled={!latestWin} onClick={() => startRevealSequence(opt.value)}>Preview</button>
