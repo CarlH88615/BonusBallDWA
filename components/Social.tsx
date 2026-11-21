@@ -16,8 +16,8 @@ interface StatsProps {
   ledgerCharity?: number; // charity payments recorded in this app's ledger
 }
 
-// The old app (20 Sep 2025 to 7 Feb 2026) gave £372 to charity in total. That figure is fixed:
-// it only counts once those old results have been brought in.
+// The old app (20 Sep 2025 to 7 Feb 2026) gave £372 to charity in total. Used only as a fallback
+// when the ledger holds no charity entries.
 const OLD_APP_CHARITY = 372;
 const OLD_APP_LAST_DRAW = '2026-02-07';
 
@@ -46,7 +46,9 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers, ledgerC
     const biggest = [...paid].sort((a, b) => Number(b.amount_won) - Number(a.amount_won))[0];
     const paidOut = paid.reduce((sum, r) => sum + Number(r.amount_won), 0);
     const hasOldResults = draws.some((r) => String(r.draw_date) < OLD_APP_LAST_DRAW);
-    const charity = (hasOldResults ? OLD_APP_CHARITY : 0) + ledgerCharity;
+    // The ledger already carries the old app's charity money, so never add the two together:
+    // use the ledger's figure, and fall back to the old app's total only if the ledger has none.
+    const charity = Math.max(ledgerCharity, hasOldResults ? OLD_APP_CHARITY : 0);
 
     // Longest wait: of the people who own a ball today, who has gone most draws without a win.
     const owners = [...new Set(balls.map((b) => b?.owner).filter(Boolean))] as string[];
