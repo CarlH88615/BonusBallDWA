@@ -27,6 +27,9 @@ const dayLabel = (dateStr: string) => {
   return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
+const listAnd = (items: (string | number)[]) =>
+  items.length <= 1 ? String(items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+
 export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers, ledgerCharity = 0 }) => {
   const stats = useMemo(() => {
     const draws = winners.filter((r) => r.winning_number);
@@ -35,6 +38,8 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers, ledgerC
     const byBall = new Map<number, number>();
     draws.forEach((r) => byBall.set(Number(r.winning_number), (byBall.get(Number(r.winning_number)) ?? 0) + 1));
     const luckiest = [...byBall.entries()].sort((a, b) => b[1] - a[1])[0];
+    // Every ball tied for the top spot, lowest number first.
+    const luckiestAll = [...byBall.entries()].filter((e) => e[1] === luckiest[1]).map((e) => e[0]).sort((a, b) => a - b);
 
     const paid = draws.filter((r) => r.winner_name && Number(r.amount_won) > 0);
     const byName = new Map<string, { wins: number; total: number }>();
@@ -43,6 +48,7 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers, ledgerC
       byName.set(r.winner_name, { wins: cur.wins + 1, total: cur.total + Number(r.amount_won) });
     });
     const mostWins = [...byName.entries()].sort((a, b) => b[1].wins - a[1].wins || b[1].total - a[1].total)[0];
+    const mostWinsAll = mostWins ? [...byName.entries()].filter((e) => e[1].wins === mostWins[1].wins).sort((a, b) => b[1].total - a[1].total).map((e) => e[0]) : [];
     const biggest = [...paid].sort((a, b) => Number(b.amount_won) - Number(a.amount_won))[0];
     const paidOut = paid.reduce((sum, r) => sum + Number(r.amount_won), 0);
     const hasOldResults = draws.some((r) => String(r.draw_date) < OLD_APP_LAST_DRAW);
@@ -62,7 +68,7 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers, ledgerC
     const drawn = new Set(byBall.keys());
     const never = Array.from({ length: 59 }, (_, i) => i + 1).filter((n) => !drawn.has(n));
     const mineNever = myNumbers.filter((n) => never.includes(n));
-    return { count: draws.length, luckiest, mostWins, biggest, longest: longest as { name: string; draws: number; never: boolean } | null, never, mineNever, charity, first: draws[draws.length - 1].draw_date as string, paidOut, paidCount: paid.length };
+    return { count: draws.length, luckiest, luckiestAll, mostWins, mostWinsAll, biggest, longest: longest as { name: string; draws: number; never: boolean } | null, never, mineNever, charity, first: draws[draws.length - 1].draw_date as string, paidOut, paidCount: paid.length };
   }, [winners, balls, myNumbers, ledgerCharity]);
 
   if (!stats) return null;
@@ -88,10 +94,10 @@ export const Stats: React.FC<StatsProps> = ({ winners, balls, myNumbers, ledgerC
         <Row icon={badge('♥', 'bg-[#e0457b] text-white')} title="Went to charity" sub="From the weeks nobody won, back when it was for charity" value={`£${stats.charity.toLocaleString('en-GB')}`} />
       )}
       {stats.luckiest && stats.luckiest[1] > 1 && (
-        <Row icon={<LotteryBall number={stats.luckiest[0]} hideShadow className="w-full h-full" />} title="Luckiest ball" sub={`${stats.luckiest[0]} has come up ${stats.luckiest[1]} times`} value={`×${stats.luckiest[1]}`} />
+        <Row icon={<LotteryBall number={stats.luckiest[0]} hideShadow className="w-full h-full" />} title={stats.luckiestAll.length > 1 ? 'Luckiest balls' : 'Luckiest ball'} sub={stats.luckiestAll.length > 1 ? `${listAnd(stats.luckiestAll)} have each come up ${stats.luckiest[1]} times` : `${stats.luckiest[0]} has come up ${stats.luckiest[1]} times`} value={`×${stats.luckiest[1]}`} />
       )}
       {stats.mostWins && (
-        <Row icon={badge(stats.mostWins[0].charAt(0).toUpperCase(), 'bg-[#ffd100] text-[#14161c]')} title="Most wins" sub={`${stats.mostWins[0]}, £${stats.mostWins[1].total} in total`} value={String(stats.mostWins[1].wins)} />
+        <Row icon={badge(stats.mostWins[0].charAt(0).toUpperCase(), 'bg-[#ffd100] text-[#14161c]')} title="Most wins" sub={stats.mostWinsAll.length > 1 ? `${listAnd(stats.mostWinsAll)}, ${stats.mostWins[1].wins} each` : `${stats.mostWins[0]}, £${stats.mostWins[1].total} in total`} value={String(stats.mostWins[1].wins)} />
       )}
       {stats.longest && stats.longest.draws > 0 && (
         <Row icon={badge(stats.longest.name.charAt(0).toUpperCase(), 'bg-[#e9ecf2] text-[#14161c]')} title="Longest wait" sub={stats.longest.never ? `${stats.longest.name} hasn't won in ${stats.longest.draws} draws` : `${stats.longest.name}, ${stats.longest.draws} draws since a win`} value={String(stats.longest.draws)} />
