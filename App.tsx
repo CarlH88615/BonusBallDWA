@@ -1,36 +1,10 @@
 // gitupdate 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LotteryBall } from './components/LotteryBall';
-import { supabase } from "./services/supabase";
+import { ScratchReveal } from './components/ScratchReveal';
+import { supabase, DEMO_ROLE, DEMO_ADMIN_EMAIL } from "./services/supabase";
 import type { BallState, NotificationMessage, Tab, AuthMode } from './types';
 
-const AnimatedBallsBackground = ({ smallBalls }: { smallBalls: BallState[] }) => {
-  return (
-    <div className="fixed inset-0 z-0 pointer-events-none opacity-20 overflow-hidden">
-      {smallBalls.map((ball) => (
-        <div
-          key={ball.id}
-          className="absolute"
-          style={{
-            left: ball.x,
-            top: ball.y,
-            width: ball.radius * 2,
-            height: ball.radius * 2,
-            transform: "translate(-50%, -50%)",
-          }}
-        >
-          <LotteryBall
-            number={ball.num}
-            hideShadow
-            className="w-full h-full"
-            opacity={0.3}
-            blur="1px"
-          />
-        </div>
-      ))}
-    </div>
-  );
-};
 
 
 
@@ -88,27 +62,30 @@ const App: React.FC = () => {
   const [resultBallNum, setResultBallNum] = useState('');
   const [paymentWeeks, setPaymentWeeks] = useState('1');
   
-  type RevealStyle = 'slot' | 'bingo' | 'tile' | 'curtain';
+  type RevealStyle = 'scratch' | 'slot' | 'bingo' | 'tile' | 'curtain';
   const REVEAL_STYLES: { value: RevealStyle; label: string }[] = [
+    { value: 'scratch', label: 'Scratch Off' },
     { value: 'slot', label: 'Slot Machine' },
     { value: 'bingo', label: 'Bingo Eliminate' },
     { value: 'tile', label: 'Tile Flip' },
     { value: 'curtain', label: 'Stage Curtain' },
   ];
   const [revealDefaultStyle, setRevealDefaultStyle] = useState<RevealStyle>(() => {
-    if (typeof window === 'undefined') return 'slot';
-    const saved = localStorage.getItem('reveal_default_style');
-    if (saved === 'slot' || saved === 'bingo' || saved === 'tile' || saved === 'curtain') return saved;
-    return 'slot';
+    if (typeof window === 'undefined') return 'scratch';
+    // v2 key: the redesign makes Scratch Off the default, ignoring any older saved choice.
+    const saved = localStorage.getItem('reveal_default_style_v2');
+    if (saved === 'scratch' || saved === 'slot' || saved === 'bingo' || saved === 'tile' || saved === 'curtain') return saved;
+    return 'scratch';
   });
   const setAsDefaultStyle = (style: RevealStyle) => {
-    localStorage.setItem('reveal_default_style', style);
+    localStorage.setItem('reveal_default_style_v2', style);
     setRevealDefaultStyle(style);
     showToast('success', `Default reveal set to ${REVEAL_STYLES.find((s) => s.value === style)?.label}`);
   };
   // Per-draw override chosen in the Record Result modal. Empty string = use default.
   const [recordRevealStyle, setRecordRevealStyle] = useState<RevealStyle | ''>('');
-  const [revealStyle, setRevealStyle] = useState<RevealStyle>('slot');
+  const [revealStyle, setRevealStyle] = useState<RevealStyle>('scratch');
+  const [revealRun, setRevealRun] = useState(0); // bumps on every play so Scratch Off remounts with fresh foil
   const [revealStep, setRevealStep] = useState<'idle' | 'running' | 'settled'>('idle');
   // Per-style state. Each style only reads what it needs.
   const [slotNumber, setSlotNumber] = useState<number>(1);
@@ -261,7 +238,6 @@ const App: React.FC = () => {
   const [blastTarget, setBlastTarget] = useState<'all' | 'unpaid' | 'specific'>('all');
   const [showInbox, setShowInbox] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
-  const [totalCharityRaised, setTotalCharityRaised] = useState<number>(0);
   const [balls, setBalls] = useState<any[]>([]);
   const [bonusBallRowId, setBonusBallRowId] = useState<string | null>(null);
   const [showNotCoveredOnly, setShowNotCoveredOnly] = useState(false);
@@ -342,6 +318,7 @@ const App: React.FC = () => {
   // DYNAMIC CALCULATIONS
 const isAdmin = useMemo(() => {
   if (!sessionEmail) return false;
+  if (DEMO_ROLE === 'admin' && sessionEmail === DEMO_ADMIN_EMAIL) return true; // local demo only
   return sessionEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }, [sessionEmail]);
 
@@ -580,7 +557,7 @@ const isAdmin = useMemo(() => {
     if (!completed) return null;
     const persistedStyle = (completed.reveal_style as RevealStyle | undefined) ?? null;
     const styleForPlayback: RevealStyle =
-      persistedStyle === 'slot' || persistedStyle === 'bingo' || persistedStyle === 'tile' || persistedStyle === 'curtain'
+      persistedStyle === 'scratch' || persistedStyle === 'slot' || persistedStyle === 'bingo' || persistedStyle === 'tile' || persistedStyle === 'curtain'
         ? persistedStyle
         : revealDefaultStyle;
     return {
@@ -625,6 +602,7 @@ const isAdmin = useMemo(() => {
         .single();
       if (fetchOpenErr || !openRow) {
         console.error("❌ Failed to fetch open draw", fetchOpenErr);
+        showToast("error", "Couldn't find the open draw. Nothing was saved.");
         return;
       }
 
@@ -662,6 +640,7 @@ const isAdmin = useMemo(() => {
       }
       if (updateErr) {
         console.error("❌ Failed to record winner", updateErr);
+        showToast("error", "Couldn't save the result. Nothing was changed.");
         return;
       }
       console.log("✅ Winner recorded");
@@ -680,7 +659,14 @@ const isAdmin = useMemo(() => {
         ]);
       if (newOpenErr) {
         console.error("❌ Failed to create next open draw", newOpenErr);
+        showToast("error", "Result saved, but next week's draw wasn't created. Check before taking payments.");
         return;
+      }
+      setDrawDate(nextDrawDateStr);
+      setSelectedResultBall(null);
+      showToast("success", isPaidWinner ? `Saved. ${winnerName} wins £${amountWon}.` : `Saved. £${rolloverPersist} rolls over.`);
+      if (notifyOnResult) {
+        sendPush("Saturday's ball is in", "Open Bonus Ball and scratch to see if it's yours.", "all", "win");
       }
 
       // Update bank only when a paid winner takes money out. Unpaid wins roll 100% forward, so no bank/ledger movement.
@@ -701,6 +687,7 @@ const isAdmin = useMemo(() => {
           if (ledgerErr) {
             console.error("❌ Failed to write ledger entry", ledgerErr);
           }
+          reloadLedger();
         }
       }
 
@@ -716,6 +703,7 @@ const isAdmin = useMemo(() => {
       setWinnerRows(data ?? []);
     } catch (err) {
       console.error("❌ Unexpected error in handleRecordResult", err);
+      showToast("error", "Something went wrong saving the result.");
     }
   };
   const handleHardReset = async () => {
@@ -1057,9 +1045,10 @@ const isAdmin = useMemo(() => {
     revealTimeoutsRef.current.push(t1, t2, t3, ...drumTimers);
   };
 
-  const startRevealSequence = (style: RevealStyle = 'slot') => {
+  const startRevealSequence = (style: RevealStyle = 'scratch') => {
     if (!latestWin) return;
     cancelRevealAnimations();
+    setRevealRun((r) => r + 1);
     setRevealStyle(style);
     setShowWinReveal(true);
     setRevealStep('running');
@@ -1077,21 +1066,6 @@ const isAdmin = useMemo(() => {
     else if (style === 'curtain') startCurtainReveal(winNum, isRollover);
   };
 
-useEffect(() => {
-  const w = window.innerWidth, h = window.innerHeight;
-  setSmallBalls([{ id: 1, x: w * 0.2, y: h * 0.2, vx: 0.8, vy: 0.6, radius: 40, num: 7 }, { id: 2, x: w * 0.8, y: h * 0.7, vx: -0.7, vy: 0.8, radius: 45, num: 24 }, { id: 3, x: w * 0.5, y: h * 0.4, vx: 0.5, vy: -0.9, radius: 35, num: 42 }]);
-  const update = () => {
-    setSmallBalls(prev => prev.map(b => {
-        let nx = b.x + b.vx, ny = b.y + b.vy, vx = b.vx, vy = b.vy;
-        if (nx - b.radius < 0 || nx + b.radius > window.innerWidth) vx *= -1;
-        if (ny - b.radius < 0 || ny + b.radius > window.innerHeight) vy *= -1;
-        return { ...b, x: nx, y: ny, vx, vy };
-      }));
-      requestRef.current = requestAnimationFrame(update);
-    };
-    requestRef.current = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(requestRef.current!);
-  }, []);
 const fetchScheduled = async () => {
   const { data } = await supabase
     .from("scheduled_notifications")
@@ -1208,24 +1182,6 @@ useEffect(() => {
     fetchBankBalance();
   }
 }, [sessionEmail]);
-useEffect(() => {
-  const fetchCharityTotal = async () => {
-    const { data, error } = await supabase
-      .from("bonus_ball_ledger")
-      .select("amount")
-      .eq("type", "charity");
-
-    if (error) {
-      console.error("❌ Failed to fetch charity total", error);
-      return;
-    }
-
-    const total = (data ?? []).reduce((sum, row) => sum + Number(row.amount), 0);
-    setTotalCharityRaised(total);
-  };
-
-  fetchCharityTotal();
-}, []);
 useEffect(() => {
   const fetchWinners = () => {
     supabase
@@ -1403,6 +1359,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       .eq("id", bonusBallRowId);
     if (error) {
       console.error("❌ Failed to persist assignment", error);
+      showToast("error", "Couldn't save that ball.");
       return;
     }
   setBalls(updatedBalls);
@@ -1450,6 +1407,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
     setBalls(updatedBalls);
     setShowAssignModal(false);
+    setAdminAction(null);
   };
 
   const openEditModal = (ballNum: number) => {
@@ -1469,7 +1427,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
   const commitPayment = async () => {
     if (!isAdmin) return;
-    const num = adminAction?.ballNum;
+    const num = payBall ?? adminAction?.ballNum;
     const weeks = parseInt(paymentWeeks);
     if (!num || isNaN(weeks) || weeks < 1) return;
 
@@ -1510,6 +1468,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       .eq("id", bonusBallRowId);
     if (error) {
       console.error("❌ Failed to persist payment", error);
+      showToast("error", "Payment didn't save.");
       return;
     }
     setBalls(updatedBalls);
@@ -1530,6 +1489,7 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
       if (ledgerErr) {
         console.error("❌ Failed to write ledger entry (deposit)", ledgerErr);
       }
+      reloadLedger();
     }
 
     const ballsLabel = affectedNumbers.map((n) => `#${n}`).join(', ');
@@ -1538,9 +1498,9 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     showToast("success", `Ball${affectedNumbers.length > 1 ? 's' : ''} ${ballsLabel} paid${throughLabel} (£${paymentAmount}).`);
     sendPush("Payment Logged", `Ball${affectedNumbers.length > 1 ? 's' : ''} ${ballsLabel} paid${throughLabel}`, "admin", "reminder");
     setAdminAction(null);
+    setPayBall(null);
     setPaymentWeeks('1');
     setApplyToAllOwner(false);
-    setSelectedBallNum(null);
   };
 
   const handleUpdatePaymentInitiate = (ballNum: number) => {
@@ -1558,18 +1518,350 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
     return normalized >= upcomingDrawDateTime;
   };
 
+
+  // ---------------------------------------------------------------------------
+  // Redesign: view state + small helpers shared by the board and admin screens.
+  // ---------------------------------------------------------------------------
+  const [adminTab, setAdminTab] = useState<'week' | 'balls' | 'money' | 'messages' | 'settings'>('week');
+  const [payBall, setPayBall] = useState<number | null>(null);
+  const [notifyOnResult, setNotifyOnResult] = useState(true);
+  const [recordBusy, setRecordBusy] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
+  const [ballFilter, setBallFilter] = useState<'all' | 'unpaid' | 'free'>('all');
+  const [showAllWinners, setShowAllWinners] = useState(false);
+  const [remindArmed, setRemindArmed] = useState(false);
+
+  // The money tab needs the ledger to say whether the books balance.
+  useEffect(() => {
+    if (activeTab === 'admin' && isAdmin) reloadLedger();
+  }, [activeTab, isAdmin]);
+
+  const UI = {
+    card: 'bg-white rounded-3xl p-4 sm:p-5',
+    btn: 'rounded-xl px-4 py-2.5 text-sm font-extrabold bg-[#14161c] text-white active:scale-95 transition disabled:opacity-40',
+    ghost: 'rounded-xl px-4 py-2.5 text-sm font-bold bg-[#e9ecf2] text-[#14161c] active:scale-95 transition disabled:opacity-40',
+    input: 'w-full bg-white border border-[#dbe0e8] rounded-xl px-4 py-3 text-base text-[#14161c] outline-none focus:border-[#14161c]',
+    dim: 'text-[#5a6270]',
+    label: 'text-sm font-bold text-[#5a6270]',
+  };
+  const chip = (on: boolean) =>
+    `rounded-full px-3.5 py-1.5 text-sm font-bold transition ${on ? 'bg-[#14161c] text-white' : 'bg-[#e9ecf2] text-[#5a6270]'}`;
+
+  const shortDate = (d?: Date | string | null) => {
+    if (!d) return '';
+    const date = typeof d === 'string' ? new Date(d) : d;
+    return date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  };
+  const drawDayLabel = (dateStr?: string | null) => {
+    if (!dateStr) return '';
+    const [y, m, d] = String(dateStr).split('-').map(Number);
+    if (!y || !m || !d) return String(dateStr);
+    return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  // The top of the app takes the colour of the signed-in person's first ball.
+  const me = (() => {
+    const n = myBalls[0]?.number;
+    if (!n) return { bg: '#1f6fd0', fg: '#ffffff' };
+    if (n <= 9) return { bg: '#14161c', fg: '#ffffff' };
+    if (n <= 19) return { bg: '#005eb8', fg: '#ffffff' };
+    if (n <= 29) return { bg: '#e4007f', fg: '#ffffff' };
+    if (n <= 39) return { bg: '#009639', fg: '#ffffff' };
+    if (n <= 49) return { bg: '#ffd100', fg: '#14161c' };
+    return { bg: '#60269e', fg: '#ffffff' };
+  })();
+
+  const countdownText = (() => {
+    if (!upcomingDrawDateTime) return '';
+    const ms = upcomingDrawDateTime.getTime() - Date.now();
+    if (ms <= 0) return 'Drawn. Waiting for the result to be entered.';
+    const hours = Math.floor(ms / 3600000);
+    const days = Math.floor(hours / 24);
+    const when = `${shortDate(upcomingDrawDateTime)}, 8pm`;
+    if (days >= 2) return `${when}. ${days} days to go`;
+    if (days === 1) return `${when}. 1 day ${hours - 24} hrs to go`;
+    if (hours >= 1) return `Tonight at 8pm. ${hours} hr${hours === 1 ? '' : 's'} to go`;
+    return 'Tonight at 8pm. Under an hour to go';
+  })();
+
+  const ballStatus = (ball: any): 'free' | 'in' | 'out' =>
+    !ball?.owner ? 'free' : isBallPaidForDraw(ball) ? 'in' : 'out';
+
+  const renderBall = (num: number, status: 'free' | 'in' | 'out', cls: string) => {
+    if (status === 'free') {
+      return (
+        <div className={`${cls} aspect-square rounded-full border-2 border-dotted border-[#9aa3b2] flex items-center justify-center text-[#5a6270] font-extrabold text-[0.7em]`}>
+          {num}
+        </div>
+      );
+    }
+    return (
+      <div className={`${cls} ${status === 'out' ? 'grayscale opacity-55' : ''}`}>
+        <LotteryBall number={num} hideShadow className="w-full h-full" />
+      </div>
+    );
+  };
+
+  const openPay = (num: number) => {
+    setPayBall(payBall === num ? null : num);
+    setPaymentWeeks('1');
+    setApplyToAllOwner(false);
+  };
+
+  // Mirrors commitPayment's date maths so the admin sees the outcome before saving.
+  const payPreview = (ball: any) => {
+    const weeks = Math.max(1, parseInt(paymentWeeks) || 1);
+    const sameOwner = ball?.owner ? balls.filter((b) => b.owner === ball.owner) : [ball];
+    const count = applyToAllOwner ? sameOwner.length : 1;
+    let until: Date | null = null;
+    if (upcomingDrawDateTime) {
+      const weekMs = 7 * 24 * 60 * 60 * 1000;
+      const existing = ball?.paidUntil ? new Date(ball.paidUntil) : null;
+      const covered = existing && existing >= upcomingDrawDateTime;
+      until = covered
+        ? new Date(existing!.getTime() + weeks * weekMs)
+        : new Date(upcomingDrawDateTime.getTime() + (weeks - 1) * weekMs);
+    }
+    return { weeks, count, cost: weeks * 2 * count, until, sameOwner };
+  };
+
+  const renderPayPanel = (ball: any) => {
+    const p = payPreview(ball);
+    return (
+      <div className="bg-[#f1f3f7] rounded-2xl p-4 space-y-3 text-left">
+        <div className="flex items-center gap-3">
+          <button className={UI.ghost + ' bg-white'} aria-label="One week fewer" onClick={() => setPaymentWeeks(String(Math.max(1, p.weeks - 1)))}>−</button>
+          <input
+            type="number"
+            min="1"
+            inputMode="numeric"
+            aria-label="Weeks paid"
+            value={paymentWeeks}
+            onChange={(e) => setPaymentWeeks(e.target.value)}
+            className="w-20 text-center bg-white border border-[#dbe0e8] rounded-xl py-2.5 text-lg font-extrabold outline-none focus:border-[#14161c]"
+          />
+          <span className="flex-1 font-bold">week{p.weeks === 1 ? '' : 's'}</span>
+          <button className={UI.ghost + ' bg-white'} aria-label="One week more" onClick={() => setPaymentWeeks(String(p.weeks + 1))}>+</button>
+        </div>
+        {p.sameOwner.length > 1 && (
+          <label className="flex items-start gap-2.5 text-sm font-semibold">
+            <input type="checkbox" className="mt-1 w-4 h-4 accent-[#14161c]" checked={applyToAllOwner} onChange={(e) => setApplyToAllOwner(e.target.checked)} />
+            <span>Apply to all of {ball.owner}'s balls ({p.sameOwner.map((b) => b.number).join(', ')})</span>
+          </label>
+        )}
+        <p className={`text-sm ${UI.dim}`}>
+          <b className="text-[#14161c]">£{p.cost}</b> for {p.count} ball{p.count === 1 ? '' : 's'}.
+          {p.until && <> In up to and including <b className="text-[#14161c]">{shortDate(p.until)}</b>.</>}
+        </p>
+        <button className={UI.btn + ' w-full py-3'} onClick={commitPayment}>Save payment</button>
+      </div>
+    );
+  };
+
+  const booksOk = Math.abs(bankBalance - expectedBankTotal) < 0.01 && Math.abs(bankBalance - ledgerNet) < 0.01;
+
+  const resultOutcome = (() => {
+    if (!selectedResultBall) return null;
+    const ball = balls.find((b) => b.number === selectedResultBall);
+    const status = ballStatus(ball);
+    return { ball, status, num: selectedResultBall };
+  })();
+
+  const confirmResult = async () => {
+    if (!selectedResultBall || recordBusy) return;
+    setRecordBusy(true);
+    try {
+      await handleRecordResult();
+    } finally {
+      setRecordBusy(false);
+    }
+  };
+
+  const remindUnpaid = async () => {
+    if (!remindArmed) {
+      setRemindArmed(true);
+      setTimeout(() => setRemindArmed(false), 5000);
+      return;
+    }
+    setRemindArmed(false);
+    const ok = await fireRealPush('Bonus Ball', "Your ball isn't paid for Saturday's draw yet. Pay Carl to be in.", 'unpaid');
+    showToast(ok ? 'success' : 'error', ok ? 'Reminder sent to everyone not paid.' : 'Reminder failed to send.');
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setSessionEmail(null);
+    setUserEmail('');
+    setShowAccount(false);
+    setActiveTab('home');
+  };
+
+  const enableNotifications = async () => {
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        showToast('error', 'Notifications are blocked for this site.');
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: VAPID_PUBLIC_KEY });
+      const { data: { user }, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !user) {
+        showToast('error', 'Not logged in.');
+        return;
+      }
+      const json = sub.toJSON();
+      const endpoint = json.endpoint;
+      const p256dh = json.keys?.p256dh;
+      const auth = json.keys?.auth;
+      if (!endpoint || !p256dh || !auth) {
+        showToast('error', 'Subscription missing required fields.');
+        return;
+      }
+      const { error: upsertErr } = await supabase.from('push_subscriptions').upsert(
+        { user_id: user.id, endpoint, p256dh, auth, active: true, created_at: new Date().toISOString() },
+        { onConflict: 'endpoint' }
+      );
+      if (upsertErr) {
+        showToast('error', upsertErr.message);
+        return;
+      }
+      showToast('success', "You're set. You'll get a notification when the ball is in.");
+    } catch (err: any) {
+      showToast('error', err?.message ?? 'Could not turn notifications on.');
+    }
+  };
+
+  const copyUserId = async () => {
+    const { data } = await supabase.auth.getUser();
+    const id = data.user?.id;
+    if (!id) {
+      showToast('error', 'Not logged in.');
+      return;
+    }
+    await navigator.clipboard.writeText(id);
+    showToast('success', 'User ID copied.');
+  };
+
+  const sendTestPush = async () => {
+    const res = await fetch('/.netlify/functions/push-broadcast', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Test Push', body: 'Hello from Bonus Ball' }),
+    });
+    const text = await res.text();
+    showToast(res.ok ? 'success' : 'error', text);
+  };
+
+  const sendBroadcast = async () => {
+    const title = 'Announcement';
+    const body = blastMessage;
+    if (!body) return;
+
+    if (scheduleMode === 'once') {
+      if (!scheduleOnceDate || !scheduleOnceTime) {
+        showToast('error', 'Pick a date and time.');
+        return;
+      }
+      const sendAt = new Date(`${scheduleOnceDate}T${scheduleOnceTime}`);
+      if (isNaN(sendAt.getTime()) || sendAt <= new Date()) {
+        showToast('error', 'The time must be in the future.');
+        return;
+      }
+      setIsTransmitting(true);
+      try {
+        const { error: insErr } = await supabase.from('scheduled_notifications').insert({
+          title, body, target: blastTarget, delivery_mode: deliveryMode,
+          send_at: sendAt.toISOString(), repeat_rule: null, active: true,
+        });
+        if (insErr) { showToast('error', 'Failed to schedule: ' + insErr.message); return; }
+        await fetchScheduled();
+        setBlastMessage('');
+        showToast('success', 'Message scheduled.');
+      } finally { setIsTransmitting(false); }
+      return;
+    }
+
+    if (scheduleMode === 'recurring') {
+      if (!recurringDay || !recurringTime) {
+        showToast('error', 'Pick a day and time.');
+        return;
+      }
+      const dayIndexMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+      const targetDay = dayIndexMap[recurringDay] ?? 6;
+      const [hour, minute] = recurringTime.split(':').map(Number);
+      const next = new Date();
+      next.setHours(hour ?? 0, minute ?? 0, 0, 0);
+      let diff = targetDay - next.getDay();
+      if (diff < 0 || (diff === 0 && next <= new Date())) diff += 7;
+      next.setDate(next.getDate() + diff);
+      setIsTransmitting(true);
+      try {
+        const { error: insErr } = await supabase.from('scheduled_notifications').insert({
+          title, body, target: blastTarget, delivery_mode: deliveryMode,
+          send_at: next.toISOString(), repeat_rule: `weekly:${recurringDay}:${recurringTime}`, active: true,
+        });
+        if (insErr) { showToast('error', 'Failed to schedule: ' + insErr.message); return; }
+        await fetchScheduled();
+        setBlastMessage('');
+        showToast('success', 'Weekly message saved.');
+      } finally { setIsTransmitting(false); }
+      return;
+    }
+
+    setIsTransmitting(true);
+    try {
+      if (deliveryMode === 'push') {
+        const ok = await fireRealPush(title, body, blastTarget);
+        showToast(ok ? 'success' : 'error', ok ? 'Message sent.' : 'Message failed to send.');
+      } else {
+        addInAppNotification(title, body, blastTarget, 'blast');
+        showToast('success', 'Added to the in-app inbox.');
+      }
+      setBlastMessage('');
+    } finally { setIsTransmitting(false); }
+  };
+
   return (
-    <div className="relative min-h-screen bg-[#020407] overflow-hidden flex flex-col font-display z-10">
-      <AnimatedBallsBackground smallBalls={smallBalls} />
+    <div className="relative min-h-screen bg-[#f1f3f7] text-[#14161c]">
       {/* TOAST */}
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] max-w-[90vw] sm:max-w-md flex items-center gap-3 bg-neutral-900 border border-neutral-700 rounded-2xl px-5 py-3 shadow-2xl">
-          <span className={`text-xl leading-none ${toast.kind === 'error' ? 'text-red-400' : toast.kind === 'success' ? 'text-green-400' : 'text-pink-400'}`}>●</span>
-          <span className="text-sm text-white">{toast.message}</span>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] w-max max-w-[90vw] sm:max-w-md flex items-center gap-3 bg-[#14161c] text-white rounded-2xl px-5 py-3 shadow-2xl">
+          <span className={`text-xl leading-none ${toast.kind === 'error' ? 'text-red-400' : toast.kind === 'success' ? 'text-green-400' : 'text-sky-300'}`}>●</span>
+          <span className="text-sm font-semibold">{toast.message}</span>
         </div>
       )}
-      {/* WIN REVEAL */}
-      {showWinReveal && (
+
+      {/* SCRATCH REVEAL — the default */}
+      {showWinReveal && revealStyle === 'scratch' && latestWin && (
+        <ScratchReveal
+          key={`${latestWin.id}-${revealRun}`}
+          ballNumber={latestWin.ballNumber}
+          winner={latestWin.winner}
+          prize={latestWin.prizeAmount}
+          isRollover={latestWin.isRollover}
+          rolloverAmount={latestWin.rolloverAmount}
+          drawDate={String(latestWin.date)}
+          myNumbers={myBalls.map((b) => b.number)}
+          bg={me.bg}
+          fg={me.fg}
+          muted={muted}
+          onToggleMute={toggleMuted}
+          onScratchSound={playTick}
+          onRevealed={() => {
+            setRevealStep('settled');
+            playThunk();
+            setTimeout(() => (latestWin.isRollover ? playChime(659, 500) : playFanfare()), 2300);
+          }}
+          onClose={(revealed) => {
+            if (revealed) dismissReveal();
+            else { cancelRevealAnimations(); setShowWinReveal(false); }
+          }}
+        />
+      )}
+
+      {/* CLASSIC REVEALS — still available from Admin, Settings */}
+      {showWinReveal && revealStyle !== 'scratch' && (
         <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-black overflow-hidden">
 
           {/* SLOT MACHINE — single big number cycling */}
@@ -1851,1421 +2143,645 @@ const handleRecoveryPasswordSubmit = async (e: React.FormEvent) => {
 
       {isLoggedIn ? (
         <>
-          {/* STRUCTURE FIX: Logged-in shell */}
-          <header className="relative z-10 pt-10 px-6 text-center">
-            <div className="flex items-center justify-between max-w-6xl mx-auto w-full absolute top-6 px-6">
-              <button onClick={() => { setShowInbox(true); setNotifications(prev => prev.map(n => ({ ...n, read: true }))); }} className={`relative p-3 rounded-full border transition-all ${hasUnread ? 'bg-pink-500 border-pink-500 text-black shadow-lg animate-pulse' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}>
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                {hasUnread && <span className="absolute -top-1 -right-1 w-3 h-3 bg-white rounded-full border-2 border-pink-500"></span>}
-              </button>
-              <div className="flex items-center gap-4">
-                <span className="text-[9px] font-black uppercase text-white/20 truncate max-w-[150px] hidden md:block">{userEmail}</span>
-                <button onClick={async () => {
-                  await supabase.auth.signOut();
-                  setSessionEmail(null);
-                  setUserEmail("");
-                }} className="px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/40 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest">Sign Out</button>
+          {activeTab === 'admin' && isAdmin ? (
+            /* ============================ ADMIN ============================ */
+            <div className="max-w-lg mx-auto min-h-screen pb-16">
+              <div className="sticky top-0 z-40 bg-[#f1f3f7]/95 backdrop-blur px-4 pt-4">
+                <div className="flex items-center justify-between">
+                  <button onClick={() => setActiveTab('home')} className={UI.ghost + ' bg-white'}>‹ Board</button>
+                  <h1 className="text-xl font-extrabold tracking-tight">Admin</h1>
+                  <span className="w-[5.5rem]" />
+                </div>
+                <div className="flex gap-1 overflow-x-auto mt-3 border-b border-[#dbe0e8]" role="tablist">
+                  {([['week', 'This week'], ['balls', 'Balls'], ['money', 'Money'], ['messages', 'Messages'], ['settings', 'Settings']] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      role="tab"
+                      aria-selected={adminTab === key}
+                      onClick={() => { setAdminTab(key); setPayBall(null); }}
+                      className={`flex-1 whitespace-nowrap px-1.5 py-2.5 text-[13px] font-extrabold border-b-[3px] -mb-px ${adminTab === key ? 'border-[#14161c] text-[#14161c]' : 'border-transparent text-[#5a6270]'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="w-12 h-12 rounded-full bg-pink-500 mx-auto flex items-center justify-center text-black font-black text-[10px] mb-4 shadow-[0_0_20px_rgba(236,72,153,0.3)] mt-12 animate-pulse">DWA</div>
-            <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">{activeTab}</h2>
-            <p className="text-pink-400 text-[9px] font-black uppercase tracking-[0.3em] mt-2">In Memory of Emmie-Rose</p>
-            {sessionEmail ? (
-              <p className="text-white/40 text-[10px] font-bold mt-2">Signed in as {sessionEmail}</p>
-            ) : (
-              <p className="text-white/40 text-[10px] font-bold mt-2">Not signed in</p>
-            )}
-            {sessionEmail ? (
-              <button
-                onClick={async () => {
-                  const perm = await Notification.requestPermission();
-                  if (perm !== "granted") {
-                    showToast("error", "Notifications permission not granted.");
-                    return;
-                  }
 
-                  const reg = await navigator.serviceWorker.ready;
-                  const sub = await reg.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: VAPID_PUBLIC_KEY,
-                  });
-
-                  console.log("Push subscription:", JSON.stringify(sub));
-                  const {
-                    data: { user },
-                    error: userErr,
-                  } = await supabase.auth.getUser();
-
-                  if (userErr || !user) {
-                    showToast("error", "Not logged in.");
-                    return;
-                  }
-
-                  const json = sub.toJSON();
-                  const endpoint = json.endpoint;
-                  const p256dh = json.keys?.p256dh;
-                  const auth = json.keys?.auth;
-
-                  if (!endpoint || !p256dh || !auth) {
-                    showToast("error", "Subscription missing required fields.");
-                    return;
-                  }
-
-                  const { error: upsertErr } = await supabase.from("push_subscriptions").upsert(
-                    {
-                      user_id: user.id,
-                      endpoint,
-                      p256dh,
-                      auth,
-                      active: true,
-                      created_at: new Date().toISOString(),
-                    },
-                    { onConflict: "endpoint" }
-                  );
-
-                  if (upsertErr) {
-                    showToast("error", upsertErr.message);
-                    return;
-                  }
-
-                  showToast("success", "Subscribed — you'll receive draw notifications.");
-
-                }}
-                className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
-              >
-                Enable Notifications
-              </button>
-            ) : null}
-
-            {sessionEmail ? (
-              <button
-                onClick={async () => {
-                  const { data } = await supabase.auth.getUser();
-                  const id = data.user?.id;
-
-                  if (!id) {
-                    showToast("error", "No user (not logged in)");
-                    return;
-                  }
-
-                  await navigator.clipboard.writeText(id);
-                  showToast("success", "User ID copied to clipboard");
-                }}
-                className="mt-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest"
-              >
-                Copy User ID
-              </button>
-            ) : null}
-          </header>
-
-          <main className="relative z-10 flex-1 p-4 sm:p-6 pb-32 sm:pb-40">
-            <div className="max-w-6xl mx-auto">
-              {activeTab === 'home' && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
-                  {!noticeDismissed && (
-                    <div className="bg-red-500/10 border border-red-500/20 rounded-[2rem] p-6 md:p-10 shadow-2xl relative">
-                      <button onClick={dismissNotice} aria-label="Dismiss" className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white text-sm flex items-center justify-center">✕</button>
-                      <div className="flex items-start gap-4 sm:gap-6 pr-8">
-                        <div className="w-12 h-12 rounded-2xl bg-red-500 flex items-center justify-center flex-shrink-0 text-white shadow-lg"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div>
-                        <div>
-                          <h4 className="text-xl font-black text-white tracking-tighter uppercase mb-2">Heads Up</h4>
-                          <p className="text-white/60 text-sm leading-relaxed max-w-xl">Unpaid winners forfeit the full prize — 100% rolls over to the next draw. Please keep your entries current.</p>
-                        </div>
-                      </div>
+              <div className="px-4 pt-4 space-y-3">
+                {/* ---------- THIS WEEK ---------- */}
+                {adminTab === 'week' && (
+                  <>
+                    <div className="grid grid-cols-3 gap-px bg-[#dbe0e8] rounded-2xl overflow-hidden">
+                      <div className="bg-white p-3"><p className="text-xl font-extrabold tabular-nums">£{currentPot}</p><p className={`text-xs font-semibold ${UI.dim}`}>Pot</p></div>
+                      <div className="bg-white p-3"><p className="text-xl font-extrabold tabular-nums">{paidCount}/59</p><p className={`text-xs font-semibold ${UI.dim}`}>Paid in</p></div>
+                      <button className="bg-white p-3 text-left" onClick={() => setAdminTab('money')}>
+                        <p className="text-xl font-extrabold tabular-nums">£{bankBalance}</p>
+                        <p className={`text-xs font-bold ${booksOk ? 'text-green-700' : 'text-red-600'}`}>{booksOk ? 'Bank ✓' : 'Bank: check'}</p>
+                      </button>
                     </div>
-                  )}
 
-                  {/* PERSONALISED HERO — signed-in users with balls */}
-                  {sessionEmail && myBalls.length > 0 && (
-                    <div className="bg-gradient-to-br from-pink-500/20 via-pink-500/10 to-transparent border border-pink-500/20 rounded-[2.5rem] p-6 md:p-10 shadow-2xl">
-                      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-pink-400 mb-2">Welcome back</p>
-                      <h3 className="text-3xl md:text-4xl font-black text-white tracking-tighter mb-6">
-                        You own {myBalls.length === 1 ? 'Ball' : `${myBalls.length} Balls`} {myBalls.map((b) => `#${b.number}`).join(', ')}
+                    <div className={UI.card + ' space-y-3'}>
+                      <h3 className="font-extrabold flex items-center gap-2">
+                        <span className={`w-6 h-6 rounded-full text-xs flex items-center justify-center ${ballsDueThisWeek.length === 0 ? 'bg-green-600 text-white' : 'bg-[#e9ecf2]'}`}>{ballsDueThisWeek.length === 0 ? '✓' : '1'}</span>
+                        {ballsDueThisWeek.length === 0
+                          ? 'Everyone who owns a ball is paid'
+                          : `Chase ${ballsDueThisWeek.length} unpaid ball${ballsDueThisWeek.length === 1 ? '' : 's'}`}
                       </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {myBalls.map((b) => {
-                          const weeks = weeksCoveredFor(b);
-                          const isPaid = weeks > 0;
-                          return (
-                            <button
-                              key={b.number}
-                              onClick={() => setSelectedBallNum(b.number)}
-                              className={`flex items-center gap-4 p-4 rounded-2xl border text-left transition-all ${isPaid ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-red-500/10 border-red-500/20 hover:bg-red-500/15'}`}
-                            >
-                              <LotteryBall number={b.number} className="w-12 h-12 flex-shrink-0" opacity={isPaid ? 1 : 0.4} />
-                              <div className="flex-1 min-w-0">
-                                <p className={`text-xs font-black uppercase tracking-widest mb-0.5 ${isPaid ? 'text-pink-400' : 'text-red-400'}`}>
-                                  {isPaid ? `Covered · ${weeks} week${weeks === 1 ? '' : 's'} left` : 'Not covered'}
-                                </p>
-                                <p className="text-sm text-white font-semibold truncate">
-                                  {isPaid ? `Paid through ${formatPaidUntil(b.paidUntil)}` : 'Pay to enter the next draw'}
-                                </p>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+                      {ballsDueThisWeek.map((b) => (
+                        <div key={b.number} className="space-y-2">
+                          <div className="flex items-center gap-3">
+                            {renderBall(b.number, 'out', 'w-10 h-10 flex-none')}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold truncate">{b.owner}</p>
+                              <p className={`text-xs ${UI.dim}`}>{b.paidUntil ? `Ran out ${shortDate(b.paidUntil)}` : 'Never paid'}</p>
+                            </div>
+                            <button className={payBall === b.number ? UI.ghost : UI.btn} onClick={() => openPay(b.number)}>{payBall === b.number ? 'Close' : 'Paid'}</button>
+                          </div>
+                          {payBall === b.number && renderPayPanel(b)}
+                        </div>
+                      ))}
+                      {ballsDueThisWeek.length > 0 && (
+                        <button className={UI.ghost + ' w-full py-3'} onClick={remindUnpaid}>
+                          {remindArmed ? 'Tap again to send the reminder' : 'Remind everyone not paid'}
+                        </button>
+                      )}
                     </div>
-                  )}
 
-                  {/* LATEST DRAW RESULT — hidden until the user has watched the reveal */}
-                  {latestWin && hasSeenLatestReveal && (
-                    <div className={`backdrop-blur-xl border rounded-[2.5rem] p-6 md:p-8 shadow-2xl flex items-center gap-4 md:gap-6 ${latestWin.isRollover ? 'bg-orange-500/[0.06] border-orange-500/30' : 'bg-white/[0.03] border-white/10'}`}>
-                      <LotteryBall number={latestWin.ballNumber} className="w-20 h-20 md:w-24 md:h-24 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-[10px] font-black uppercase tracking-[0.3em] mb-1 ${latestWin.isRollover ? 'text-orange-400' : 'text-pink-400'}`}>Last Draw · {latestWin.date}</p>
-                        {latestWin.isRollover ? (
-                          <>
-                            <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter truncate">🔥 Rollover</h4>
-                            <p className="text-orange-400 font-black text-base md:text-lg">£{latestWin.rolloverAmount} carried forward</p>
-                          </>
+                    <div className={UI.card + ' space-y-3'}>
+                      <h3 className="font-extrabold flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full text-xs flex items-center justify-center bg-[#e9ecf2]">2</span>
+                        Enter the bonus ball for {drawDayLabel(drawDate)}
+                      </h3>
+                      {!drawAwaitingResult && (
+                        <p className="text-sm font-semibold text-amber-700 bg-amber-50 rounded-xl px-3 py-2">This draw hasn't happened yet. It's on {shortDate(upcomingDrawDateTime)} at 8pm.</p>
+                      )}
+                      <div className="grid grid-cols-10 gap-1">
+                        {balls.map((b) => (
+                          <button
+                            key={b.number}
+                            aria-label={`Ball ${b.number}`}
+                            aria-pressed={selectedResultBall === b.number}
+                            onClick={() => setSelectedResultBall(selectedResultBall === b.number ? null : b.number)}
+                            className={`rounded-full ${selectedResultBall === b.number ? 'ring-4 ring-[#f2b632] scale-110' : ''} transition`}
+                          >
+                            <LotteryBall number={b.number} hideShadow className="w-full" />
+                          </button>
+                        ))}
+                      </div>
+                      <div className="bg-[#f1f3f7] rounded-2xl p-3 text-sm">
+                        {!resultOutcome ? (
+                          <span className={UI.dim}>Tap the number that came up. You'll see what happens before anything is saved.</span>
+                        ) : resultOutcome.status === 'in' ? (
+                          <><b className="text-base">{resultOutcome.ball.owner} wins £{currentPot}.</b><br />Ball {resultOutcome.num} is paid for this draw.</>
+                        ) : resultOutcome.status === 'out' ? (
+                          <><b className="text-base">Ball {resultOutcome.num} is {resultOutcome.ball.owner}'s, but it isn't paid.</b><br />Nobody wins. £{currentPot} rolls over.</>
                         ) : (
-                          <>
-                            <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter truncate">{latestWin.winner}</h4>
-                            <p className="text-yellow-500 font-black text-xl">£{latestWin.prizeAmount}</p>
-                          </>
+                          <><b className="text-base">Ball {resultOutcome.num} has no owner.</b><br />Nobody wins. £{currentPot} rolls over.</>
                         )}
                       </div>
-                      <button onClick={() => startRevealSequence(latestWin?.revealStyle)} className="hidden sm:block px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:text-white hover:bg-white/10">Replay</button>
-                    </div>
-                  )}
-
-                  {/* ONBOARDING — first-time signed-in users */}
-                  {sessionEmail && !seenOnboarding && (
-                    <div className="bg-pink-500/10 border border-pink-500/20 rounded-[2.5rem] p-6 md:p-8 shadow-2xl relative">
-                      <button onClick={completeOnboarding} aria-label="Dismiss" className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white text-sm flex items-center justify-center">✕</button>
-                      <h4 className="text-xl font-black text-white tracking-tighter uppercase mb-3">Getting Started</h4>
-                      <ol className="space-y-3 text-sm text-white/70 list-decimal list-inside">
-                        <li>Browse the <button onClick={() => setActiveTab('balls')} className="text-pink-400 underline underline-offset-2">Balls tab</button> to see what's available.</li>
-                        <li>Ask Carl to assign a ball to you and mark you as paid.</li>
-                        <li>Tap the bell icon in the header to subscribe to push notifications so you get the result on Saturday.</li>
-                      </ol>
-                      <button onClick={completeOnboarding} className="mt-5 text-xs font-black uppercase tracking-widest text-pink-400 hover:text-pink-300">Got it →</button>
-                    </div>
-                  )}
-
-                  {/* GUIDELINES — show for not-logged-in or users with no balls */}
-                  {(!sessionEmail || myBalls.length === 0) && (
-                    <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-6 md:p-10 shadow-2xl space-y-8">
+                      <label className="flex items-start gap-2.5 text-sm font-semibold">
+                        <input type="checkbox" className="mt-1 w-4 h-4 accent-[#14161c]" checked={notifyOnResult} onChange={(e) => setNotifyOnResult(e.target.checked)} />
+                        <span>Send everyone "Saturday's ball is in" (doesn't give the number away)</span>
+                      </label>
                       <div>
-                        <h3 className="text-3xl md:text-4xl font-black text-white tracking-tighter mb-4">The Guidelines</h3>
-                        <p className="text-white/60 text-sm leading-relaxed max-w-lg">
-                          A family initiative — £2 per ball, drawn every Saturday night using the National Lottery Bonus Ball.
-                          {sessionEmail && myBalls.length === 0 && ' Ask Carl to assign you a ball to get started.'}
-                        </p>
+                        <label className={UI.label} htmlFor="reveal-style">Reveal</label>
+                        <select id="reveal-style" className={UI.input + ' mt-1'} value={recordRevealStyle} onChange={(e) => setRecordRevealStyle(e.target.value as RevealStyle | '')}>
+                          <option value="">Default ({REVEAL_STYLES.find((s) => s.value === revealDefaultStyle)?.label})</option>
+                          {REVEAL_STYLES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                        </select>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                        <div className="flex gap-4 p-5 bg-white/5 rounded-3xl border border-white/5">
-                          <div className="w-10 h-10 rounded-xl bg-pink-500/20 flex items-center justify-center text-pink-500"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1" /></svg></div>
-                          <div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Weekly Entry</p><p className="text-white font-bold text-lg">£2</p></div>
-                        </div>
-                        <div className="flex gap-4 p-5 bg-white/5 rounded-3xl border border-white/5">
-                          <div className="w-10 h-10 rounded-xl bg-pink-500/20 flex items-center justify-center text-pink-500"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14" /></svg></div>
-                          <div><p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Draw Night</p><p className="text-white font-bold text-lg">Saturday 8pm</p></div>
-                        </div>
-                      </div>
+                      <button className={UI.btn + ' w-full py-3.5'} disabled={!selectedResultBall || recordBusy} onClick={confirmResult}>
+                        {recordBusy ? 'Saving…' : selectedResultBall ? `Confirm ball ${selectedResultBall}` : 'Confirm result'}
+                      </button>
                     </div>
-                  )}
-                </div>
-              )}
+                  </>
+                )}
 
-              {activeTab === 'balls' && (
-                <div className="animate-in fade-in zoom-in-95 duration-500 space-y-10">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className={`border rounded-3xl p-8 flex items-center justify-between shadow-xl ${drawAwaitingResult ? 'bg-orange-500/[0.06] border-orange-500/30' : 'bg-white/[0.03] border-white/10'}`}><div><p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${drawAwaitingResult ? 'text-orange-400' : 'text-white/30'}`}>{drawAwaitingResult ? 'Awaiting Result' : 'Upcoming Draw'}</p><p className="text-2xl font-black text-white">{formattedDrawDate}</p></div><div className={`w-12 h-12 rounded-full border flex items-center justify-center font-black text-xs ${drawAwaitingResult ? 'border-orange-500/40 text-orange-400' : 'border-white/10 text-white/20'}`}>{drawAwaitingResult ? '⏱' : 'Sat'}</div></div>
-                    <div className={`relative border rounded-3xl p-6 sm:p-8 shadow-xl w-full overflow-hidden ${totalRollover > 0 ? 'bg-gradient-to-br from-orange-500/20 via-yellow-500/10 to-transparent border-yellow-500/30' : 'bg-white/[0.03] border-white/10'}`}>
-                      {totalRollover > 0 && (
-                        <div className="absolute -top-2 -right-2 px-3 py-1 rounded-full bg-gradient-to-r from-pink-500 via-orange-400 to-yellow-400 animate-pulse shadow-[0_0_25px_rgba(255,120,0,0.6)]">
-                          <span className="text-black font-black tracking-widest text-[10px]">🔥 ROLLOVER</span>
-                        </div>
-                      )}
-                      <div className="flex items-end justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-1">Active Prize</p>
-                          <p className={`text-5xl sm:text-6xl font-black tracking-tighter ${totalRollover > 0 ? 'text-yellow-400 drop-shadow-[0_0_25px_rgba(250,204,21,0.4)]' : 'text-white'}`}>£{currentPot}</p>
-                          {rolloverStreak >= 2 && (
-                            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-orange-400 mt-2">
-                              {rolloverStreak} weeks of rollover 🔥
-                            </p>
-                          )}
-                        </div>
-                        <div className="self-start px-3 py-1 bg-pink-500 text-black text-[10px] font-black rounded-full uppercase">Live</div>
-                      </div>
-                      <div className="mt-4 space-y-1 text-xs text-white/60 font-bold uppercase tracking-widest">
-                        <div className="flex justify-between">
-                          <span>This draw</span>
-                          <span>£{currentPot - totalRollover}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Rollover</span>
-                          <span>£{totalRollover}</span>
-                        </div>
-                      </div>
+                {/* ---------- BALLS ---------- */}
+                {adminTab === 'balls' && (
+                  <>
+                    <input type="text" placeholder="Search name or number" className={UI.input} value={adminSearchTerm} onChange={(e) => setAdminSearchTerm(e.target.value)} />
+                    <div className="flex gap-2 flex-wrap">
+                      <button className={chip(ballFilter === 'all')} onClick={() => setBallFilter('all')}>All 59</button>
+                      <button className={chip(ballFilter === 'unpaid')} onClick={() => setBallFilter('unpaid')}>Not paid {ballsDueThisWeek.length}</button>
+                      <button className={chip(ballFilter === 'free')} onClick={() => setBallFilter('free')}>Free {balls.filter((b) => !b.owner).length}</button>
                     </div>
-                  </div>
-                  <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-10 md:p-14 shadow-2xl">
-                    <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-3 sm:gap-6">
+                    <div className={UI.card + ' divide-y divide-[#e9ecf2]'}>
                       {balls.map((ball) => {
-                        const num = ball.number;
-                        const ownerName = ball?.owner;
-                        const isPaid = isBallPaidForDraw(ball);
+                        const status = ballStatus(ball);
+                        const term = adminSearchTerm.trim().toLowerCase();
+                        if (term && !(String(ball.number).includes(term) || (ball.owner ?? '').toLowerCase().includes(term))) return null;
+                        if (ballFilter === 'unpaid' && status !== 'out') return null;
+                        if (ballFilter === 'free' && status !== 'free') return null;
                         return (
-                          <div key={num} onClick={() => setSelectedBallNum(num)} className="group cursor-pointer transition-all flex flex-col items-center gap-1.5">
-                            <LotteryBall number={num} className="w-full group-hover:scale-110 transition-transform" opacity={isPaid ? 1 : 0.1} />
-                            <p className={`text-[10px] sm:text-[8px] font-black uppercase truncate w-full text-center mt-1 transition-colors ${isPaid ? 'text-white/80' : 'text-white/20'}`}>
-                              {ownerName
-                                ? `${ownerName}${isPaid ? '' : ' ⚠️'}`
-                                : 'Open'}
-                            </p>
-                            <p className="hidden sm:block text-[8px] font-bold uppercase text-center text-white/30">
-                              {isPaid
-                                ? `Paid until ${formatPaidUntil(ball.paidUntil)}`
-                                : 'Expired'}
-                            </p>
+                          <div key={ball.number} className="py-3 first:pt-0 last:pb-0 space-y-2">
+                            <div className="flex items-center gap-3">
+                              {renderBall(ball.number, status, 'w-10 h-10 flex-none')}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold truncate">{ball.owner ?? 'Free'}</p>
+                                <p className={`text-xs ${UI.dim}`}>
+                                  {status === 'free' ? 'Nobody has this ball' : status === 'in' ? `Paid up to ${shortDate(ball.paidUntil)}` : ball.paidUntil ? `Ran out ${shortDate(ball.paidUntil)}` : 'Never paid'}
+                                </p>
+                              </div>
+                              {ball.owner ? (
+                                <>
+                                  <button className={(payBall === ball.number || status === 'in' ? UI.ghost : UI.btn) + ' px-3'} onClick={() => openPay(ball.number)}>{payBall === ball.number ? 'Close' : 'Paid'}</button>
+                                  <button className={UI.ghost + ' px-3'} onClick={() => openEditModal(ball.number)}>Edit</button>
+                                </>
+                              ) : (
+                                <button className={UI.ghost + ' px-3'} onClick={() => openAssignModal(ball.number)}>Assign</button>
+                              )}
+                            </div>
+                            {payBall === ball.number && renderPayPanel(ball)}
                           </div>
                         );
                       })}
                     </div>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'winners' && (
-                <div className="animate-in fade-in slide-in-from-right-4 duration-500 max-w-4xl mx-auto space-y-8">
-                   <div className="text-center mb-12">
-                     <h3 className="text-5xl font-black text-white tracking-tighter mb-2">Hall of Fame</h3>
-                     <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">Celebrating our lucky champions</p>
-                   </div>
-                   <div className="space-y-4">
-                      {winnerRows.length === 0 ? (
-                        <div className="text-center py-20 text-white/40">
-                          <p className="font-black uppercase tracking-widest mb-2">No results yet</p>
-                          <p className="text-xs text-white/30">Winners will appear here after the first draw is recorded.</p>
-                        </div>
-                      ) : winnerRows.map((r, i) => (
-                        <div key={i} className="bg-white/[0.03] backdrop-blur-xl border border-white/10 p-6 md:p-8 rounded-[2rem] flex items-center gap-6 md:gap-10 hover:bg-white/5 transition-all group">
-                          <LotteryBall number={r.winning_number} className="w-16 h-16 md:w-20 md:h-20 group-hover:rotate-12 transition-transform flex-shrink-0" />
-                          <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-4 min-w-0">
-                            <div className="min-w-0">
-                              <p className="text-[10px] font-black uppercase text-pink-500 tracking-widest mb-1">{r.draw_date}</p>
-                              <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter leading-none truncate">{r.winner_name ?? 'VACANT'}</h4>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <div className="text-right">
-                                <p className="text-[10px] font-black uppercase text-white/30 mb-1">Awarded</p>
-                                <p className="text-2xl md:text-3xl font-black text-yellow-500 tracking-tighter">£{r.amount_won}</p>
-                              </div>
-                              {i === 0 && r.winner_name && (
-                                <button
-                                  onClick={() => startRevealSequence(latestWin?.revealStyle)}
-                                  title="Replay reveal"
-                                  className="w-10 h-10 rounded-full bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 flex items-center justify-center flex-shrink-0"
-                                >
-                                  ▶
-                                </button>
-                              )}
-                            </div>
+                    <div className={UI.card + ' space-y-3'}>
+                      <h3 className="font-extrabold">People with a login</h3>
+                      {membersWithStats.length === 0 ? (
+                        <p className={`text-sm ${UI.dim}`}>Nobody has registered yet.</p>
+                      ) : membersWithStats.map((m: any) => (
+                        <div key={m.id} className="flex items-center gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold truncate">{m.full_name || 'No name'}</p>
+                            <p className={`text-xs truncate ${UI.dim}`}>{m.email}</p>
+                            <p className={`text-xs ${UI.dim}`}>{m.ballNumbers.length === 0 ? 'No balls linked' : `Ball${m.ballNumbers.length === 1 ? '' : 's'} ${m.ballNumbers.join(', ')}`}</p>
                           </div>
+                          <button className="text-sm font-bold text-red-600 px-2 py-1" onClick={() => removeMember(m.id, m.full_name || m.email)}>Remove</button>
                         </div>
                       ))}
                     </div>
-                </div>
-              )}
+                  </>
+                )}
 
-              {activeTab === 'admin' && isAdmin && (
-                <div className="animate-in fade-in slide-in-from-bottom-8 duration-500 space-y-12">
-                  {/* DUE THIS WEEK — at the top so the admin sees it first */}
-                  {ballsDueThisWeek.length > 0 && (
-                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-[2.5rem] p-6 md:p-10 shadow-2xl">
-                      <div className="flex items-center justify-between mb-6">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-400 mb-1">Action needed</p>
-                          <h4 className="text-2xl md:text-3xl font-black text-white tracking-tighter">
-                            {ballsDueThisWeek.length} ball{ballsDueThisWeek.length === 1 ? '' : 's'} not covered for next draw
-                          </h4>
+                {/* ---------- MONEY ---------- */}
+                {adminTab === 'money' && (
+                  <>
+                    <div className={UI.card}>
+                      <p className={UI.label}>In the bank</p>
+                      <p className="text-5xl font-extrabold tracking-tight tabular-nums">£{Number(bankBalance).toFixed(2)}</p>
+                      <span className={`inline-block mt-2 rounded-full px-3 py-1 text-sm font-bold ${booksOk ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'}`}>{booksOk ? 'Books balance' : "Books don't balance"}</span>
+                      <dl className="mt-4 text-sm space-y-1.5">
+                        <div className="flex justify-between"><dt className={UI.dim}>Prepaid weeks + rollover should be</dt><dd className={`font-bold tabular-nums ${Math.abs(bankBalance - expectedBankTotal) < 0.01 ? '' : 'text-red-600'}`}>£{Number(expectedBankTotal).toFixed(2)}</dd></div>
+                        <div className="flex justify-between"><dt className={UI.dim}>Ledger adds up to</dt><dd className={`font-bold tabular-nums ${Math.abs(bankBalance - ledgerNet) < 0.01 ? '' : 'text-red-600'}`}>£{Number(ledgerNet).toFixed(2)}</dd></div>
+                        <div className="flex justify-between"><dt className={UI.dim}>Rolled over into this pot</dt><dd className="font-bold tabular-nums">£{Number(totalRollover).toFixed(2)}</dd></div>
+                      </dl>
+                    </div>
+                    <div className={UI.card + ' space-y-2'}>
+                      <h3 className="font-extrabold">Add an entry</h3>
+                      <select aria-label="Entry type" className={UI.input} value={newEntryType} onChange={(e) => setNewEntryType(e.target.value as any)}>
+                        <option value="deposit">Money in</option>
+                        <option value="paid_win">Prize paid out</option>
+                        <option value="adjustment">Adjustment (can be negative)</option>
+                      </select>
+                      <div className="flex gap-2">
+                        <input type="number" step="0.01" inputMode="decimal" placeholder="£" aria-label="Amount" className={UI.input + ' w-28 flex-none'} value={newEntryAmount} onChange={(e) => setNewEntryAmount(e.target.value)} />
+                        <input type="text" placeholder="Note (optional)" aria-label="Note" className={UI.input} value={newEntryNotes} onChange={(e) => setNewEntryNotes(e.target.value)} />
+                      </div>
+                      <button className={UI.btn + ' w-full py-3'} disabled={ledgerBusy} onClick={addManualEntry}>Add entry</button>
+                    </div>
+                    <div className={UI.card + ' divide-y divide-[#e9ecf2]'}>
+                      {ledgerWithRunning.length === 0 ? (
+                        <p className={`text-sm ${UI.dim}`}>No ledger entries yet.</p>
+                      ) : ledgerWithRunning.map((row) => {
+                        const effect = ledgerEffectOnBank(row.type, row.amount);
+                        const typeLabel: Record<string, string> = { deposit: 'Money in', paid_win: 'Prize paid', charity: 'Charity', adjustment: 'Adjustment' };
+                        return (
+                          <div key={row.id} className="py-3 first:pt-0 last:pb-0 flex items-start gap-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold">{typeLabel[row.type] ?? row.type}</p>
+                              <p className={`text-xs ${UI.dim}`}>{new Date(row.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}{row.notes ? `, ${row.notes}` : row.reference ? `, ${row.reference}` : ''}</p>
+                              <button className="text-xs font-bold text-red-600 mt-1" disabled={ledgerBusy} onClick={() => deleteLedgerEntry(row)}>Delete</button>
+                            </div>
+                            <div className="text-right">
+                              <p className={`font-extrabold tabular-nums ${effect > 0 ? 'text-green-700' : effect < 0 ? 'text-red-600' : ''}`}>{effect > 0 ? '+' : effect < 0 ? '−' : ''}£{Math.abs(Number(row.amount)).toFixed(2)}</p>
+                              <p className={`text-xs tabular-nums ${UI.dim}`}>£{Number(row.runningBalance).toFixed(2)}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {/* ---------- MESSAGES ---------- */}
+                {adminTab === 'messages' && (
+                  <>
+                    <div className={UI.card + ' space-y-3'}>
+                      <h3 className="font-extrabold">New message</h3>
+                      <textarea aria-label="Message" rows={4} placeholder="What do you want to say?" className={UI.input + ' resize-none'} value={blastMessage} onChange={(e) => setBlastMessage(e.target.value)} />
+                      <div>
+                        <p className={UI.label + ' mb-1.5'}>To</p>
+                        <div className="flex gap-2 flex-wrap">
+                          <button className={chip(blastTarget === 'all')} onClick={() => setBlastTarget('all')}>Everyone</button>
+                          <button className={chip(blastTarget === 'unpaid')} onClick={() => setBlastTarget('unpaid')}>Not paid</button>
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        {ballsDueThisWeek.map((b) => (
-                          <div key={b.number} className="flex items-center justify-between bg-black/30 border border-white/5 rounded-2xl p-3 sm:p-4">
-                            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                              <LotteryBall number={b.number} className="w-10 h-10 flex-shrink-0" opacity={0.5} />
-                              <div className="min-w-0">
-                                <p className="text-sm font-black text-white truncate">{b.owner}</p>
-                                <p className="text-[10px] font-bold uppercase text-white/40 truncate">
-                                  {b.paidUntil ? `Expired ${formatPaidUntil(b.paidUntil)}` : 'Never paid'}
-                                </p>
-                              </div>
+                      <div>
+                        <p className={UI.label + ' mb-1.5'}>How</p>
+                        <div className="flex gap-2 flex-wrap">
+                          <button className={chip(deliveryMode === 'push')} onClick={() => setDeliveryMode('push')}>Phone notification</button>
+                          <button className={chip(deliveryMode === 'inapp')} onClick={() => setDeliveryMode('inapp')}>In-app inbox</button>
+                        </div>
+                      </div>
+                      <div>
+                        <p className={UI.label + ' mb-1.5'}>When</p>
+                        <div className="flex gap-2 flex-wrap">
+                          <button className={chip(scheduleMode === 'now')} onClick={() => setScheduleMode('now')}>Now</button>
+                          <button className={chip(scheduleMode === 'once')} onClick={() => setScheduleMode('once')}>Later</button>
+                          <button className={chip(scheduleMode === 'recurring')} onClick={() => setScheduleMode('recurring')}>Every week</button>
+                        </div>
+                      </div>
+                      {scheduleMode === 'once' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <input type="date" aria-label="Date" className={UI.input} value={scheduleOnceDate} onChange={(e) => setScheduleOnceDate(e.target.value)} />
+                          <input type="time" aria-label="Time" className={UI.input} value={scheduleOnceTime} onChange={(e) => setScheduleOnceTime(e.target.value)} />
+                        </div>
+                      )}
+                      {scheduleMode === 'recurring' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <select aria-label="Day" className={UI.input} value={recurringDay} onChange={(e) => setRecurringDay(e.target.value)}>
+                            {['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((d) => <option key={d} value={d}>{d}</option>)}
+                          </select>
+                          <input type="time" aria-label="Time" className={UI.input} value={recurringTime} onChange={(e) => setRecurringTime(e.target.value)} />
+                        </div>
+                      )}
+                      <button className={UI.btn + ' w-full py-3.5'} disabled={isTransmitting || !blastMessage} onClick={sendBroadcast}>
+                        {isTransmitting ? 'Sending…' : scheduleMode === 'now' ? 'Send now' : 'Save schedule'}
+                      </button>
+                    </div>
+                    <div className={UI.card + ' space-y-3'}>
+                      <h3 className="font-extrabold">Scheduled</h3>
+                      {scheduledNotifications.length === 0 && <p className={`text-sm ${UI.dim}`}>Nothing scheduled.</p>}
+                      {(scheduledNotifications as any[]).map((item) => (
+                        <div key={item.id} className="flex items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold">{item.body}</p>
+                            <p className={`text-xs ${UI.dim}`}>
+                              To {item.target === 'unpaid' ? 'not paid' : 'everyone'}
+                              {item.repeat_rule ? `, every ${String(item.repeat_rule).split(':').slice(1).join(' at ')}` : item.send_at ? `, ${new Date(item.send_at).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+                            </p>
+                          </div>
+                          <button className="text-sm font-bold text-red-600 px-2 py-1" onClick={() => deleteScheduled(item.id)}>Delete</button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* ---------- SETTINGS ---------- */}
+                {adminTab === 'settings' && (
+                  <>
+                    <div className={UI.card + ' space-y-3'}>
+                      <h3 className="font-extrabold">Reveal style</h3>
+                      {!latestWin && <p className={`text-sm ${UI.dim}`}>Record a draw first to preview these.</p>}
+                      {([
+                        { value: 'scratch', desc: 'Scratch the gold off the ball with your finger' },
+                        { value: 'bingo', desc: 'All 59 balls knocked out down to a final three' },
+                        { value: 'slot', desc: 'One big number spins and slows' },
+                        { value: 'tile', desc: 'Tiles flip over, winner last' },
+                        { value: 'curtain', desc: 'Red curtains shake, then part' },
+                      ] as { value: RevealStyle; desc: string }[]).map((opt) => {
+                        const isDefault = revealDefaultStyle === opt.value;
+                        return (
+                          <div key={opt.value} className="flex items-center gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold">{REVEAL_STYLES.find((s) => s.value === opt.value)?.label}{isDefault && <span className="ml-2 text-xs font-bold bg-[#14161c] text-white rounded-full px-2 py-0.5">Default</span>}</p>
+                              <p className={`text-xs ${UI.dim}`}>{opt.desc}</p>
                             </div>
-                            <button
-                              onClick={() => handleUpdatePaymentInitiate(b.number)}
-                              className="ml-2 px-3 sm:px-4 py-2 bg-pink-500 text-black font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-xl hover:bg-pink-400 flex-shrink-0"
-                            >
-                              Mark Paid
-                            </button>
+                            <button className={UI.ghost + ' px-3'} disabled={!latestWin} onClick={() => startRevealSequence(opt.value)}>Preview</button>
+                            {!isDefault && <button className={UI.ghost + ' px-3'} onClick={() => setAsDefaultStyle(opt.value)}>Use</button>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className={UI.card + ' flex items-center gap-3'}>
+                      <div className="flex-1"><p className="font-bold">Send a test notification</p><p className={`text-xs ${UI.dim}`}>Goes to everyone with notifications on, not just you.</p></div>
+                      <button className={UI.ghost} onClick={sendTestPush}>Send</button>
+                    </div>
+                    <div className={UI.card + ' flex items-center gap-3'}>
+                      <div className="flex-1"><p className="font-bold">Copy my user ID</p><p className={`text-xs ${UI.dim}`}>For fixing account links.</p></div>
+                      <button className={UI.ghost} onClick={copyUserId}>Copy</button>
+                    </div>
+                    <div className="bg-white rounded-3xl p-4 sm:p-5 border-2 border-red-200">
+                      <button onClick={() => setDangerOpen((v) => !v)} className="w-full flex items-center justify-between text-left">
+                        <div><p className="font-extrabold text-red-700">Hard reset</p><p className={`text-xs ${UI.dim}`}>Clears every ball and winner, and sets the bank to £0.</p></div>
+                        <span className={UI.dim}>{dangerOpen ? '▾' : '▸'}</span>
+                      </button>
+                      {dangerOpen && (
+                        <div className="mt-4 space-y-2">
+                          <p className="text-sm text-red-700">This cannot be undone. Past ledger entries stay.</p>
+                          <input type="password" aria-label="PIN" placeholder="Enter PIN" className={UI.input} value={resetPin} onChange={(e) => setResetPin(e.target.value)} />
+                          <button disabled={isResetting} onClick={handleHardReset} className="w-full py-3 rounded-xl bg-red-600 text-white font-extrabold disabled:opacity-50">{isResetting ? 'Resetting…' : 'Hard reset'}</button>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* ============================ THE BOARD ============================ */
+            <div className="max-w-lg mx-auto pb-12">
+              <header className="rounded-b-[2rem] px-5 pt-5 pb-7" style={{ background: me.bg, color: me.fg }}>
+                <div className="flex items-center gap-2">
+                  <p className="flex-1 text-lg font-extrabold tracking-tight">Bonus Ball</p>
+                  <button
+                    aria-label="Notifications"
+                    onClick={() => { setShowInbox(true); setNotifications((prev) => prev.map((n) => ({ ...n, read: true }))); }}
+                    className="relative w-10 h-10 rounded-full bg-black/15 flex items-center justify-center"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3A6 6 0 006 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                    {hasUnread && <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-[#ffd100] border border-black/20" />}
+                  </button>
+                  <button aria-label="Account" onClick={() => setShowAccount(true)} className="w-10 h-10 rounded-full bg-black/15 font-extrabold uppercase">
+                    {(sessionEmail ?? '?').charAt(0)}
+                  </button>
+                </div>
+
+                {latestWin && !hasSeenLatestReveal ? (
+                  <div className="mt-6">
+                    <p className="text-4xl font-extrabold tracking-tight leading-tight">Saturday's ball is in</p>
+                    <p className="font-semibold opacity-90 mt-1">Scratch it off to see if it's yours.</p>
+                    <button onClick={() => startRevealSequence(latestWin.revealStyle)} className="mt-4 rounded-2xl bg-white text-[#14161c] font-extrabold px-6 py-3.5 active:scale-95 transition">Show me</button>
+                  </div>
+                ) : (
+                  <div className="mt-5">
+                    <p className="font-bold opacity-90">Saturday's pot</p>
+                    <p className="text-[5.5rem] font-extrabold leading-none tracking-tighter tabular-nums">£{currentPot}</p>
+                    <p className="font-semibold mt-2">{countdownText}</p>
+                    {totalRollover > 0 && (
+                      <span className="inline-block mt-3 rounded-full bg-[#ffd100] text-[#14161c] text-sm font-extrabold px-3 py-1 ring-1 ring-black/10">
+                        {rolloverStreak >= 2 ? `Rolled over ${rolloverStreak} times. ` : ''}Includes £{totalRollover} rolled over
+                      </span>
+                    )}
+                  </div>
+                )}
+              </header>
+
+              <main className="px-4 pt-4 space-y-3">
+                {/* YOUR BALLS */}
+                <section className={UI.card + ' space-y-3'}>
+                  <h2 className="font-extrabold">Your balls</h2>
+                  {myBalls.length === 0 ? (
+                    <p className={`text-sm ${UI.dim}`}>You don't have a ball yet. The dotted ones below are free. Ask Carl for one.</p>
+                  ) : myBalls.map((b) => {
+                    const weeks = weeksCoveredFor(b);
+                    return (
+                      <button key={b.number} onClick={() => setSelectedBallNum(b.number)} className="w-full flex items-center gap-3 text-left">
+                        {renderBall(b.number, weeks > 0 ? 'in' : 'out', 'w-14 h-14 flex-none')}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold">{weeks > 0 ? 'In for Saturday' : 'Not in this Saturday'}</p>
+                          <p className={`text-sm ${UI.dim}`}>{weeks > 0 ? `Paid up to ${shortDate(b.paidUntil)} (${weeks} draw${weeks === 1 ? '' : 's'})` : 'Pay Carl to get it back in. If it comes up unpaid, the pot rolls over.'}</p>
+                        </div>
+                        {weeks > 0 && <span className="rounded-full bg-green-100 text-green-800 text-xs font-extrabold px-2.5 py-1">Paid</span>}
+                      </button>
+                    );
+                  })}
+                </section>
+
+                {/* LAST DRAW — hidden until they've seen the reveal */}
+                {latestWin && hasSeenLatestReveal && (
+                  <section className={UI.card + ' flex items-center gap-3'}>
+                    <LotteryBall number={latestWin.ballNumber} hideShadow className="w-14 h-14 flex-none" />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm ${UI.dim}`}>Last draw, {drawDayLabel(latestWin.date)}</p>
+                      <p className="font-extrabold leading-snug">{latestWin.isRollover ? `Rolled over (£${latestWin.rolloverAmount})` : `${latestWin.winner} won £${latestWin.prizeAmount}`}</p>
+                    </div>
+                    <button className={UI.ghost} onClick={() => startRevealSequence(revealDefaultStyle)}>Replay</button>
+                  </section>
+                )}
+
+                {/* THE BOARD */}
+                <section className={UI.card + ' space-y-3'}>
+                  <div className="flex items-baseline justify-between">
+                    <h2 className="font-extrabold">The board</h2>
+                    <span className={`text-sm font-semibold ${UI.dim}`}>{paidCount} of 59 in</span>
+                  </div>
+                  <div className="grid grid-cols-8 gap-1.5 text-sm">
+                    {balls.map((ball) => {
+                      const mine = myBalls.some((b) => b.number === ball.number);
+                      return (
+                        <button
+                          key={ball.number}
+                          aria-label={`Ball ${ball.number}, ${ball.owner ?? 'free'}`}
+                          onClick={() => setSelectedBallNum(ball.number)}
+                          className={`rounded-full active:scale-90 transition ${mine ? 'ring-[3px] ring-[#14161c] ring-offset-2' : ''}`}
+                        >
+                          {renderBall(ball.number, ballStatus(ball), 'w-full')}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className={`text-xs ${UI.dim}`}>Colour means in. Grey means not paid. Dotted means free. Tap any ball to see whose it is.</p>
+                </section>
+
+                {/* WINNERS */}
+                <section className={UI.card + ' space-y-3'}>
+                  <h2 className="font-extrabold">Winners</h2>
+                  {(() => {
+                    const rows = (winnerRows as any[]).filter((r) => hasSeenLatestReveal || r.id !== (latestWin as any)?.id);
+                    if (rows.length === 0) return <p className={`text-sm ${UI.dim}`}>No draws yet.</p>;
+                    return (
+                      <>
+                        {rows.slice(0, showAllWinners ? rows.length : 5).map((r) => (
+                          <div key={r.id} className="flex items-center gap-3">
+                            <LotteryBall number={Number(r.winning_number)} hideShadow className="w-10 h-10 flex-none" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold truncate">{r.winner_name ?? 'Rolled over'}</p>
+                              <p className={`text-xs ${UI.dim}`}>{drawDayLabel(r.draw_date)}</p>
+                            </div>
+                            {r.winner_name && <p className="font-extrabold tabular-nums">£{r.amount_won}</p>}
                           </div>
                         ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-2 space-y-8">
-                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
-                        <div className="flex items-center justify-between mb-8">
-                          <h4 className="text-2xl font-black text-white uppercase tracking-tighter">Directory Control</h4>
-                          <div className="flex items-center gap-3">
-                            <label className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/40">
-                              <input
-                                type="checkbox"
-                                className="accent-pink-500"
-                                checked={showNotCoveredOnly}
-                                onChange={(e) => setShowNotCoveredOnly(e.target.checked)}
-                              />
-                              Show not covered for next draw
-                            </label>
-                            <input type="text" placeholder="Search..." className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-pink-500" value={adminSearchTerm} onChange={(e) => setAdminSearchTerm(e.target.value)} />
-                        </div>
-                      </div>
-                      <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                        {balls.map((ball) => {
-                            const num = ball.number;
-                            const ownerName = ball?.owner;
-                            const isPaid = isBallPaidForDraw(ball);
-                            const notCovered = !isPaid;
-                            const matchesSearch =
-                              !adminSearchTerm ||
-                              num.toString().includes(adminSearchTerm) ||
-                              (ownerName && ownerName.toLowerCase().includes(adminSearchTerm.toLowerCase()));
-                            if (!matchesSearch) return null;
-                            if (showNotCoveredOnly && !notCovered) return null;
-                            return (
-                              <div key={num} className="bg-white/[0.02] border border-white/5 p-4 rounded-2xl flex items-center justify-between hover:bg-white/[0.05] transition-all">
-                                <div className="flex items-center gap-4">
-                                  <LotteryBall number={num} className="w-10 h-10" opacity={isPaid ? 1 : 0.2} />
-                                  <div>
-                                    <p className="text-sm font-black text-white leading-none">
-                                      {ownerName ?? `Vacant Ball #${num}`}{!isPaid && ' ⚠️'}
-                                    </p>
-                                    <p className="text-[9px] font-bold uppercase mt-1 text-white/30">
-                                      {isPaid ? `Paid until and including ${formatPaidUntil(ball.paidUntil)}` : 'Expired'}
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                  {ownerName ? (
-                                    <>
-                                      <button onClick={() => handleUpdatePaymentInitiate(num)} className="px-3 py-1.5 text-[9px] font-black uppercase rounded-lg bg-pink-500 text-black hover:bg-pink-400 transition-all">Record Payment</button>
-                                      <button
-                                        onClick={() => openEditModal(num)}
-                                        className="p-2 bg-white/5 text-white/30 hover:text-white rounded-lg"
-                                      >
-                                        Edit
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <button onClick={() => openAssignModal(num)} className="px-3 py-1.5 bg-white/5 text-white/40 text-[9px] font-black uppercase rounded-lg hover:bg-white/10 transition-all">Assign Member</button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
-                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-8">Quick Actions</h4>
-                        <div className="grid grid-cols-2 gap-4">
-                          <button onClick={() => setAdminAction({ type: 'result' })} className="flex flex-col items-center justify-center p-8 bg-white/5 border border-white/5 rounded-3xl hover:bg-white/10 transition-all gap-3">
-                            <svg className="w-8 h-8 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                            <span className="text-[10px] font-black uppercase text-white/40 tracking-widest text-center">Add Result</span>
-                          </button>
-                        </div>
-                        <button
-                          onClick={() => setShowLedger(true)}
-                          className="mt-4 w-full rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white py-3"
-                        >
-                          View Ledger
-                        </button>
-                      </div>
-
-                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 md:p-10 shadow-2xl">
-                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Reveal Lab</h4>
-                        <p className="text-[11px] text-white/40 mb-6">Preview each style and set your default. The Record Result modal lets you override per draw.</p>
-                        {!latestWin && (
-                          <p className="text-xs text-white/50 italic">No latest winner to preview — record a draw first.</p>
+                        {rows.length > 5 && (
+                          <button className={UI.ghost + ' w-full'} onClick={() => setShowAllWinners((v) => !v)}>{showAllWinners ? 'Show fewer' : `Show all ${rows.length}`}</button>
                         )}
-                        {latestWin && (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {[
-                              { value: 'slot' as RevealStyle, title: 'Slot Machine', desc: 'Huge number cycles fast, slows with a thunk' },
-                              { value: 'bingo' as RevealStyle, title: 'Bingo Eliminate', desc: 'All 59 balls, eliminated until three remain in a final showdown' },
-                              { value: 'tile' as RevealStyle, title: 'Tile Flip', desc: '"?" tiles sweep-flip, winner glows last' },
-                              { value: 'curtain' as RevealStyle, title: 'Stage Curtain', desc: 'Red curtains shake, then part dramatically' },
-                            ].map((opt) => {
-                              const isDefault = revealDefaultStyle === opt.value;
-                              return (
-                                <div key={opt.value} className={`p-4 rounded-2xl border transition-all ${isDefault ? 'bg-pink-500/10 border-pink-500/40' : 'bg-white/5 border-white/10'}`}>
-                                  <div className="flex items-center justify-between mb-2">
-                                    <span className="text-xs font-black uppercase tracking-widest text-pink-400">{opt.title}</span>
-                                    {isDefault && <span className="text-[9px] font-black uppercase tracking-widest text-pink-300 px-2 py-0.5 bg-pink-500/20 rounded-full">Default</span>}
-                                  </div>
-                                  <p className="text-[10px] text-white/50 mb-3">{opt.desc}</p>
-                                  <div className="flex gap-2">
-                                    <button onClick={() => startRevealSequence(opt.value)} className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/80 hover:text-white hover:bg-white/10">Preview</button>
-                                    <button
-                                      onClick={() => setAsDefaultStyle(opt.value)}
-                                      disabled={isDefault}
-                                      className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDefault ? 'bg-white/5 border border-white/10 text-white/30 cursor-default' : 'bg-pink-500 text-black hover:bg-pink-400'}`}
-                                    >
-                                      {isDefault ? 'Default' : 'Set Default'}
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="space-y-8">
-                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
-                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3 mb-8">Broadcaster</h4>
-                        <div className="space-y-6">
-                          {/* Delivery mode toggle */}
-                          <div>
-                            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Delivery Mode</label>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => setDeliveryMode("push")}
-                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${deliveryMode === "push" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}
-                              >
-                                Push Notification
-                              </button>
-                              <button
-                                onClick={() => setDeliveryMode("inapp")}
-                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${deliveryMode === "inapp" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}
-                              >
-                                In-App Broadcast
-                              </button>
-                            </div>
-                          </div>
-                          <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Target</label><div className="flex gap-2">{(['all', 'unpaid'] as const).map(t => (
-                            <button key={t} onClick={() => setBlastTarget(t)} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${blastTarget === t ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>{t}</button>
-                          ))}<button disabled className="flex-1 py-2 text-[10px] font-black uppercase rounded-lg border bg-white/5 border-white/10 text-white/20 cursor-not-allowed">custom</button></div></div>
-                          {/* Schedule mode */}
-                          <div>
-                            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Schedule</label>
-                            <div className="flex gap-2">
-                              <button onClick={() => setScheduleMode("now")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "now" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Send Now</button>
-                              <button onClick={() => setScheduleMode("once")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "once" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Schedule Once</button>
-                              <button onClick={() => setScheduleMode("recurring")} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg border transition-all ${scheduleMode === "recurring" ? 'bg-pink-500 border-pink-500 text-black shadow-lg' : 'bg-white/5 border-white/10 text-white/40'}`}>Recurring</button>
-                            </div>
-                          </div>
-                          {/* Schedule inputs (UI only) */}
-                          {scheduleMode === "once" && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <input type="date" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={scheduleOnceDate} onChange={(e) => setScheduleOnceDate(e.target.value)} />
-                              <input type="time" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={scheduleOnceTime} onChange={(e) => setScheduleOnceTime(e.target.value)} />
-                            </div>
-                          )}
-                          {scheduleMode === "recurring" && (
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                              <select className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value="weekly" disabled>
-                                <option value="weekly">Weekly</option>
-                              </select>
-                              <select className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={recurringDay} onChange={(e) => setRecurringDay(e.target.value)}>
-                                {["Sat","Sun","Mon","Tue","Wed","Thu","Fri"].map(d => <option key={d} value={d}>{d}</option>)}
-                              </select>
-                              <input type="time" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white" value={recurringTime} onChange={(e) => setRecurringTime(e.target.value)} />
-                            </div>
-                          )}
-                          <div><label className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-3 block">Payload</label><textarea value={blastMessage} onChange={(e) => setBlastMessage(e.target.value)} rows={5} placeholder="Message text..." className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm outline-none focus:border-pink-500 transition-all resize-none" /></div>
-                          <button
-                            disabled={isTransmitting || !blastMessage}
-                            onClick={async () => {
-                              const title = "Announcement";
-                              const body = blastMessage;
-
-                              if (scheduleMode === "once") {
-                                if (!scheduleOnceDate || !scheduleOnceTime) {
-                                  showToast("error", "Pick a date and time for the scheduled send.");
-                                  return;
-                                }
-                                const sendAt = new Date(`${scheduleOnceDate}T${scheduleOnceTime}`);
-                                if (isNaN(sendAt.getTime()) || sendAt <= new Date()) {
-                                  showToast("error", "Scheduled time must be in the future.");
-                                  return;
-                                }
-                                setIsTransmitting(true);
-                                try {
-                                  const { error: insErr } = await supabase.from("scheduled_notifications").insert({
-                                    title, body, target: blastTarget, delivery_mode: deliveryMode,
-                                    send_at: sendAt.toISOString(), repeat_rule: null, active: true,
-                                  });
-                                  if (insErr) { showToast("error", "Failed to schedule: " + insErr.message); return; }
-                                  await fetchScheduled();
-                                  setBlastMessage('');
-                                } finally { setIsTransmitting(false); }
-                                return;
-                              }
-
-                              if (scheduleMode === "recurring") {
-                                if (!recurringDay || !recurringTime) {
-                                  showToast("error", "Pick a day and time for the recurring send.");
-                                  return;
-                                }
-                                const dayIndexMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-                                const targetDay = dayIndexMap[recurringDay] ?? 6;
-                                const [hour, minute] = recurringTime.split(":").map(Number);
-                                const next = new Date();
-                                next.setHours(hour ?? 0, minute ?? 0, 0, 0);
-                                let diff = targetDay - next.getDay();
-                                if (diff < 0 || (diff === 0 && next <= new Date())) diff += 7;
-                                next.setDate(next.getDate() + diff);
-
-                                setIsTransmitting(true);
-                                try {
-                                  const { error: insErr } = await supabase.from("scheduled_notifications").insert({
-                                    title, body, target: blastTarget, delivery_mode: deliveryMode,
-                                    send_at: next.toISOString(),
-                                    repeat_rule: `weekly:${recurringDay}:${recurringTime}`,
-                                    active: true,
-                                  });
-                                  if (insErr) { showToast("error", "Failed to schedule: " + insErr.message); return; }
-                                  await fetchScheduled();
-                                  setBlastMessage('');
-                                } finally { setIsTransmitting(false); }
-                                return;
-                              }
-
-                              // scheduleMode === "now"
-                              setIsTransmitting(true);
-                              try {
-                                if (deliveryMode === "push" || deliveryMode === "both") {
-                                  const ok = await fireRealPush(title, body, blastTarget);
-                                  if (!ok) showToast("error", "Push broadcast failed. Check console for details.");
-                                }
-                                if (deliveryMode === "inapp" || deliveryMode === "both") {
-                                  addInAppNotification(title, body, blastTarget, 'blast');
-                                }
-                                setBlastMessage('');
-                              } finally { setIsTransmitting(false); }
-                            }}
-                            className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-pink-400 transition-all disabled:opacity-30 shadow-xl shadow-pink-500/10"
-                          >
-                            {isTransmitting ? 'Sending…' : (scheduleMode === 'now' ? 'Send Broadcast' : 'Save Schedule')}
-                          </button>
-                          <button
-                            onClick={async () => {
-                              console.log("Test Push config", { deliveryMode, blastTarget, scheduleMode, scheduleOnceDate, scheduleOnceTime, recurringDay, recurringTime });
-                              const res = await fetch("/.netlify/functions/push-broadcast", {
-                                method: "POST",
-                                headers: { "content-type": "application/json" },
-                                body: JSON.stringify({ title: "Test Push", body: "Hello from Netlify Function ✅" }),
-                              });
-
-                              const text = await res.text();
-                              if (!res.ok) {
-                                showToast("error", text);
-                                return;
-                              }
-                              showToast("success", text);
-                            }}
-                            className="w-full py-4 bg-white/10 text-white font-black uppercase text-xs tracking-widest rounded-2xl hover:bg-white/20 transition-all"
-                          >
-                            Send Test Push (Real)
-                          </button>
-
-                        </div>
-                      </div>
-                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
-                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Record Result</h4>
-                        <div className="space-y-4">
-                          <select
-                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-sm"
-                            value={selectedResultBall ?? ''}
-                            onChange={(e) => setSelectedResultBall(e.target.value ? Number(e.target.value) : null)}
-                          >
-                            <option value="">Select ball</option>
-                            {balls.map(b => (
-                              <option key={b.number} value={b.number}>{b.number} {b.owner ? `- ${b.owner}` : '- Vacant'}</option>
-                            ))}
-                          </select>
-                          <div>
-                            <label className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1 block">Reveal style</label>
-                            <select
-                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-sm"
-                              value={recordRevealStyle}
-                              onChange={(e) => setRecordRevealStyle(e.target.value as RevealStyle | '')}
-                            >
-                              <option value="">Use default ({REVEAL_STYLES.find((s) => s.value === revealDefaultStyle)?.label})</option>
-                              {REVEAL_STYLES.map((s) => (
-                                <option key={s.value} value={s.value}>{s.label}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <button
-                            onClick={handleRecordResult}
-                            className="w-full py-4 bg-pink-500 text-black font-black uppercase text-xs tracking-widest rounded-xl"
-                          >
-                            Record Result
-                          </button>
-                          <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Rollover: £{rolloverAmount}</p>
-                        </div>
-                      </div>
-                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
-                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Bank</h4>
-                        <p className="text-sm font-black text-white/80">Balance: £{bankBalance}</p>
-                      </div>
-                      {/* DANGER ZONE — collapsed by default */}
-                      <div className="bg-red-500/5 border border-red-500/20 rounded-[2.5rem] p-6 md:p-8 shadow-2xl">
-                        <button
-                          onClick={() => setDangerOpen((v) => !v)}
-                          className="w-full flex items-center justify-between text-left"
-                        >
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-red-400 mb-1">Danger Zone</p>
-                            <h4 className="text-lg font-black text-white uppercase tracking-tighter">Hard Reset</h4>
-                          </div>
-                          <span className="text-white/40">{dangerOpen ? '▾' : '▸'}</span>
-                        </button>
-                        {dangerOpen && (
-                          <div className="mt-6 space-y-3">
-                            <p className="text-xs text-red-400 leading-relaxed">
-                              This permanently clears all balls, all winners, and resets the bank to £0. Past ledger entries remain. This <strong>cannot</strong> be undone.
-                            </p>
-                            <input
-                              type="password"
-                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white"
-                              placeholder="Enter PIN"
-                              value={resetPin}
-                              onChange={(e) => setResetPin(e.target.value)}
-                            />
-                            <button
-                              disabled={isResetting}
-                              onClick={handleHardReset}
-                              className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-black uppercase text-xs tracking-widest rounded-xl disabled:opacity-50"
-                            >
-                              {isResetting ? 'Resetting...' : 'Hard Reset'}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
-                        <div>
-                          <h3 className="text-lg font-bold mb-4">Scheduled Notifications</h3>
-
-                          {scheduledNotifications.length === 0 && (
-                            <p className="text-gray-400">No scheduled notifications.</p>
-                          )}
-
-                          {scheduledNotifications.map((item) => (
-                            <div
-                              key={item.id}
-                              className="mb-4 p-4 rounded bg-black border border-gray-700"
-                            >
-                              <p className="font-semibold">{item.title}</p>
-                              <p className="text-sm text-gray-400">{item.body}</p>
-                              <p className="text-xs text-gray-500 mt-2">
-                                Target: {item.target} | Mode: {item.delivery_mode}
-                              </p>
-                              {item.send_at && (
-                                <p className="text-xs text-gray-500">
-                                  Send At: {new Date(item.send_at).toLocaleString()}
-                                </p>
-                              )}
-                              {item.repeat_rule && (
-                                <p className="text-xs text-gray-500">
-                                  Repeat: {item.repeat_rule}
-                                </p>
-                              )}
-                              <button
-                                onClick={() => deleteScheduled(item.id)}
-                                className="mt-3 text-xs text-red-400 hover:text-red-300"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      {/* MEMBERS */}
-                      <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-6 md:p-8 shadow-2xl">
-                        <h4 className="text-2xl font-black text-white uppercase tracking-tighter mb-6">Members</h4>
-                        {membersWithStats.length === 0 ? (
-                          <p className="text-sm text-white/40">No registered members yet.</p>
-                        ) : (
-                          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-                            {membersWithStats.map((m: any) => (
-                              <div key={m.id} className="flex items-center justify-between gap-3 bg-black/30 border border-white/5 rounded-2xl p-3">
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-sm font-black text-white truncate">{m.full_name || '—'}</p>
-                                  <p className="text-[10px] uppercase font-bold text-white/40 truncate">{m.email}</p>
-                                  <p className="text-[10px] font-bold text-pink-400 mt-1">
-                                    {m.ballNumbers.length === 0
-                                      ? 'No balls'
-                                      : `${m.ballNumbers.length} ball${m.ballNumbers.length === 1 ? '' : 's'} · ${m.totalWeeks} week${m.totalWeeks === 1 ? '' : 's'} covered`}
-                                  </p>
-                                </div>
-                                <button
-                                  onClick={() => removeMember(m.id, m.full_name || m.email)}
-                                  className="text-[10px] font-black uppercase text-red-400 hover:text-red-300 px-2 py-1"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-[2.5rem] p-10 text-black shadow-2xl">
-                         <div className="flex justify-between items-start mb-10"><div><p className="text-[10px] font-black uppercase tracking-widest opacity-60">Status</p><h4 className="text-4xl font-black tracking-tighter leading-none">{paidCount > 0 ? 'Active' : 'Growth'}</h4></div><div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg></div></div>
-                         <div className="space-y-4">
-                          <div className="flex justify-between text-xs font-bold border-b border-black/10 pb-2"><span>Paid Members</span><span>{paidCount}/59</span></div>
-                          <div className="flex justify-between text-xs font-bold"><span>Prize Pot</span><span>£{currentPot}</span></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </main>
-
-          {/* NAV BAR */}
-          <nav className="fixed bottom-0 left-0 w-full bg-[#020407]/95 backdrop-blur-3xl border-t border-white/10 pb-safe z-50">
-            <div className="max-w-2xl mx-auto flex items-center justify-around px-4 sm:px-8 h-20 sm:h-24">
-              {(['home', 'balls', 'winners', 'admin'] as Tab[]).map(t => {
-                if (t === 'admin' && !isAdmin) return null;
-                return (
-                  <button key={t} onClick={() => setActiveTab(t)} className={`flex flex-col items-center gap-1.5 transition-all group ${activeTab === t ? 'scale-110' : 'opacity-50 hover:opacity-100'}`}>
-                    <div className={`w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center transition-all ${activeTab === t ? 'bg-pink-500 text-black shadow-[0_0_25px_rgba(236,72,153,0.3)]' : 'bg-white/5 text-white'}`}>
-                      {t === 'home' && <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3" /></svg>}
-                      {t === 'balls' && <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16m-7 6h7" /></svg>}
-                      {t === 'winners' && <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 3v4M3 5h4M6 17v4m-2-2h4" /></svg>}
-                      {t === 'admin' && <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4" /></svg>}
-                    </div>
-                    <span className="text-[9px] sm:text-[8px] font-black uppercase tracking-widest text-white/40 group-hover:text-white transition-colors">{t}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </nav>
-
-          {showLedger && (
-            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div className="bg-neutral-900 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
-
-                <div className="flex justify-between items-center p-4 border-b border-neutral-800">
-                  <h2 className="text-lg font-semibold">Ledger</h2>
-                  <button
-                    onClick={() => setShowLedger(false)}
-                    className="text-neutral-400 hover:text-white"
-                  >
-                    Close
-                  </button>
-                </div>
-
-                <div className="p-4 overflow-y-auto space-y-6">
-                  {/* AUDIT PANEL */}
-                  {(() => {
-                    const driftBalls = bankBalance - expectedBankTotal;
-                    const driftLedger = bankBalance - ledgerNet;
-                    const driftClass = (n: number) =>
-                      Math.abs(n) < 0.01 ? "text-green-400" : "text-red-400";
-                    return (
-                      <div className="bg-neutral-800/60 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <p className="text-neutral-400 text-xs uppercase tracking-wider">Bank balance</p>
-                          <p className="text-2xl font-bold">£{Number(bankBalance).toFixed(2)}</p>
-                        </div>
-                        <div>
-                          <p className="text-neutral-400 text-xs uppercase tracking-wider">Expected (prepaid + rollover)</p>
-                          <p className="text-2xl font-bold">£{Number(expectedBankTotal).toFixed(2)}</p>
-                          <p className={`text-xs ${driftClass(driftBalls)}`}>
-                            Δ £{driftBalls.toFixed(2)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-neutral-400 text-xs uppercase tracking-wider">Ledger net</p>
-                          <p className="text-2xl font-bold">£{Number(ledgerNet).toFixed(2)}</p>
-                          <p className={`text-xs ${driftClass(driftLedger)}`}>
-                            Δ £{driftLedger.toFixed(2)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-neutral-400 text-xs uppercase tracking-wider">Open rollover</p>
-                          <p className="text-2xl font-bold">£{Number(totalRollover).toFixed(2)}</p>
-                        </div>
-                      </div>
+                      </>
                     );
                   })()}
+                </section>
 
-                  {/* ADD MANUAL ENTRY */}
-                  {isAdmin && (
-                    <div className="bg-neutral-800/40 rounded-xl p-4">
-                      <p className="text-sm font-semibold mb-3">Add entry</p>
-                      <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
-                        <select
-                          className="md:col-span-3 bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm"
-                          value={newEntryType}
-                          onChange={(e) => setNewEntryType(e.target.value as any)}
-                        >
-                          <option value="deposit">Deposit</option>
-                          <option value="paid_win">Paid win (out)</option>
-                          <option value="charity">Charity (out)</option>
-                          <option value="adjustment">Adjustment (signed)</option>
-                        </select>
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Amount"
-                          className="md:col-span-2 bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm"
-                          value={newEntryAmount}
-                          onChange={(e) => setNewEntryAmount(e.target.value)}
-                        />
-                        <input
-                          type="text"
-                          placeholder="Notes (optional)"
-                          className="md:col-span-5 bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm"
-                          value={newEntryNotes}
-                          onChange={(e) => setNewEntryNotes(e.target.value)}
-                        />
-                        <button
-                          disabled={ledgerBusy}
-                          onClick={addManualEntry}
-                          className="md:col-span-2 bg-pink-500 hover:bg-pink-600 disabled:opacity-50 text-black font-semibold rounded px-3 py-2 text-sm"
-                        >
-                          Add
-                        </button>
-                      </div>
-                      <p className="text-xs text-neutral-500 mt-2">
-                        Adjustments accept negative amounts. All other types are stored as positive — the type determines the sign on the bank.
-                      </p>
-                    </div>
-                  )}
+                <p className={`text-sm text-center px-4 pt-2 ${UI.dim}`}>£2 a ball each week. Drawn Saturday 8pm using the National Lottery bonus ball. If the ball that comes up isn't paid, the whole pot rolls over.</p>
+              </main>
+            </div>
+          )}
 
-                  {/* TABLE */}
-                  {ledgerWithRunning.length === 0 ? (
-                    <p className="text-neutral-400">No ledger entries found.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="text-neutral-400 border-b border-neutral-800">
-                          <tr>
-                            <th className="text-left py-2 pr-3">Date</th>
-                            <th className="text-left py-2 pr-3">Type</th>
-                            <th className="text-right py-2 pr-3">Amount</th>
-                            <th className="text-right py-2 pr-3">Running</th>
-                            <th className="text-left py-2 pr-3">Reference</th>
-                            <th className="text-left py-2 pr-3">Notes</th>
-                            {isAdmin && <th className="py-2"></th>}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {ledgerWithRunning.map((row) => {
-                            const effect = ledgerEffectOnBank(row.type, row.amount);
-                            const sign = effect > 0 ? "+" : effect < 0 ? "−" : "";
-                            const amtClass = effect > 0 ? "text-green-400" : effect < 0 ? "text-red-400" : "text-neutral-300";
-                            return (
-                              <tr key={row.id} className="border-b border-neutral-800/60 hover:bg-neutral-800/30">
-                                <td className="py-2 pr-3 whitespace-nowrap text-neutral-300">
-                                  {new Date(row.created_at).toLocaleString()}
-                                </td>
-                                <td className="py-2 pr-3 whitespace-nowrap">{row.type}</td>
-                                <td className={`py-2 pr-3 text-right whitespace-nowrap font-mono ${amtClass}`}>
-                                  {sign}£{Math.abs(Number(row.amount)).toFixed(2)}
-                                </td>
-                                <td className="py-2 pr-3 text-right whitespace-nowrap font-mono text-neutral-400">
-                                  £{Number(row.runningBalance).toFixed(2)}
-                                </td>
-                                <td className="py-2 pr-3 whitespace-nowrap text-neutral-300">{row.reference}</td>
-                                <td className="py-2 pr-3 text-neutral-400">{row.notes ?? ""}</td>
-                                {isAdmin && (
-                                  <td className="py-2 text-right">
-                                    <button
-                                      disabled={ledgerBusy}
-                                      onClick={() => deleteLedgerEntry(row)}
-                                      className="text-red-400 hover:text-red-300 disabled:opacity-40 text-xs"
-                                    >
-                                      Delete
-                                    </button>
-                                  </td>
-                                )}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
+          {/* ACCOUNT SHEET */}
+          {showAccount && (
+            <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setShowAccount(false)} />
+              <div className="relative w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-6 space-y-3">
+                <p className={`text-sm ${UI.dim}`}>Signed in as</p>
+                <p className="font-extrabold break-all -mt-2">{sessionEmail}</p>
+                {isAdmin && <button className={UI.btn + ' w-full py-3.5'} onClick={() => { setActiveTab('admin'); setShowAccount(false); }}>Open admin</button>}
+                <button className={UI.ghost + ' w-full py-3.5'} onClick={enableNotifications}>Turn on notifications</button>
+                <button className={UI.ghost + ' w-full py-3.5'} onClick={signOut}>Sign out</button>
+                <button className={`w-full py-2 text-sm font-bold ${UI.dim}`} onClick={() => setShowAccount(false)}>Close</button>
               </div>
             </div>
           )}
 
-          {/* ADMIN ACTION MODAL */}
-          {adminAction && isAdmin && (
-            <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 animate-in fade-in duration-300">
-              <div
-                className="absolute inset-0 bg-black/90 backdrop-blur-2xl"
-                onClick={() => setAdminAction(null)}
-              />
-              <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 shadow-2xl">
-                <button
-                  onClick={() => setAdminAction(null)}
-                  className="absolute top-8 right-8 text-white/20 hover:text-white"
-                >
-                  ✕
-                </button>
-
-                {adminAction.type === "assign" && (
-                  <div className="space-y-6 text-center">
-                    <LotteryBall number={adminAction.ballNum!} className="w-32 h-32 mx-auto" />
-                    <input
-                      autoFocus
-                      value={assignmentName}
-                      onChange={(e) => setAssignmentName(e.target.value)}
-                      placeholder="Member name"
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
-                    />
-                    <select
-                      value={selectedMemberId}
-                      onChange={(e) => setSelectedMemberId(e.target.value)}
-                      className="w-full mt-2 p-2 rounded bg-black border border-gray-600 text-white"
-                    >
-                      <option value="">Optional: Link to registered member</option>
-                      {members.map((member) => (
-                        <option key={member.id} value={member.id}>
-                          {member.full_name} ({member.email})
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={handleResetToVacant}
-                      className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-700 transition text-white font-semibold"
-                    >
-                      Reset to Vacant
-                    </button>
-                    <button
-                      onClick={commitAssignment}
-                      className="w-full py-4 bg-pink-500 text-black font-black rounded-xl"
-                    >
-                      Confirm Assignment
-                    </button>
-                  </div>
-                )}
-                {adminAction.type === "payment" && (
-                  <div className="space-y-6 text-center">
-                    <LotteryBall number={adminAction.ballNum!} className="w-32 h-32 mx-auto" />
-                    <p className="text-white/70 text-sm">Record payment for Ball #{adminAction.ballNum}</p>
-                    <div className="flex gap-3 justify-center">
-                      <button
-                        onClick={() => setPaymentWeeks('1')}
-                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border ${paymentWeeks === '1' ? 'bg-pink-500 border-pink-500 text-black' : 'bg-white/5 border-white/10 text-white/60'}`}
-                      >
-                        1 week
-                      </button>
-                      <button
-                        onClick={() => setPaymentWeeks('4')}
-                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border ${paymentWeeks === '4' ? 'bg-pink-500 border-pink-500 text-black' : 'bg-white/5 border-white/10 text-white/60'}`}
-                      >
-                        4 weeks
-                      </button>
-                    </div>
-                    <input
-                      type="number"
-                      min="1"
-                      value={paymentWeeks}
-                      onChange={(e) => setPaymentWeeks(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-center"
-                      placeholder="Weeks to add"
-                    />
-                    <label className="flex items-center gap-2 justify-center text-[10px] font-black uppercase tracking-widest text-white/60">
-                      <input
-                        type="checkbox"
-                        className="accent-pink-500"
-                        checked={applyToAllOwner}
-                        onChange={(e) => setApplyToAllOwner(e.target.checked)}
-                      />
-                      Apply to all numbers owned by this person
-                    </label>
-                    <button
-                      onClick={commitPayment}
-                      className="w-full py-4 bg-pink-500 text-black font-black rounded-xl"
-                    >
-                      Confirm Payment
-                    </button>
-                  </div>
-                )}
-                {adminAction.type === "result" && (
-                  <div className="space-y-4 text-center">
-                    <h4 className="text-xl font-black text-white uppercase">Record Draw Result</h4>
-                    <p className="text-white/60 text-sm">
-                      Winning Ball: {selectedResultBall ?? 'None selected'}
-                    </p>
-                    <p className="text-white/50 text-xs">
-                      Status: {(() => {
-                        const ball = balls.find(b => b.number === selectedResultBall);
-                        if (!ball?.owner) return 'Vacant — full pot will roll to next draw';
-                        return isBallPaidForDraw(ball)
-                          ? `Paid up — ${ball.owner} will receive the prize`
-                          : `Unpaid — ${ball.owner} forfeits, full pot rolls over`;
-                      })()}
-                    </p>
-                    <select
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-sm"
-                      value={selectedResultBall ?? ''}
-                      onChange={(e) => setSelectedResultBall(e.target.value ? Number(e.target.value) : null)}
-                    >
-                      <option value="">Select ball</option>
-                      {balls.map(b => {
-                        const marker = !b.owner ? '○' : isBallPaidForDraw(b) ? '✓' : '✗';
-                        const label = b.owner ? `${b.owner}` : 'Vacant';
-                        return <option key={b.number} value={b.number}>{marker} {b.number} — {label}</option>;
-                      })}
-                    </select>
-                    <p className="text-[10px] text-white/30 leading-snug">
-                      ✓ paid · ✗ unpaid · ○ vacant
-                    </p>
-                    <div className="flex gap-3 justify-center">
-                      <button
-                        onClick={() => { handleRecordResult(); setAdminAction(null); }}
-                        className="flex-1 py-3 bg-pink-500 text-black font-black uppercase text-xs rounded-xl"
-                      >
-                        Confirm Result
-                      </button>
-                      <button
-                        onClick={() => setAdminAction(null)}
-                        className="flex-1 py-3 bg-white/10 text-white font-black uppercase text-xs rounded-xl"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
+          {/* ASSIGN / EDIT OWNER */}
+          {adminAction && adminAction.type === 'assign' && isAdmin && (
+            <div className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setAdminAction(null)} />
+              <div className="relative w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-6 space-y-3 text-center">
+                <LotteryBall number={adminAction.ballNum!} hideShadow className="w-24 h-24 mx-auto" />
+                <h3 className="text-xl font-extrabold">Who has ball {adminAction.ballNum}?</h3>
+                <input autoFocus aria-label="Name" value={assignmentName} onChange={(e) => setAssignmentName(e.target.value)} placeholder="Name" className={UI.input} />
+                <select aria-label="Link to a login" value={selectedMemberId} onChange={(e) => setSelectedMemberId(e.target.value)} className={UI.input}>
+                  <option value="">Not linked to a login</option>
+                  {(members as any[]).map((member) => (
+                    <option key={member.id} value={member.id}>{member.full_name} ({member.email})</option>
+                  ))}
+                </select>
+                <button className={UI.btn + ' w-full py-3.5'} onClick={commitAssignment}>Save</button>
+                <button type="button" onClick={handleResetToVacant} className="w-full py-3 rounded-xl bg-red-50 text-red-700 font-bold">Make this ball free again</button>
+                <button className={`w-full py-2 text-sm font-bold ${UI.dim}`} onClick={() => setAdminAction(null)}>Cancel</button>
               </div>
             </div>
           )}
 
-          {/* DETAIL MODAL */}
+          {/* BALL DETAIL SHEET */}
           {selectedBallNum && !adminAction && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-              <div
-                className="absolute inset-0 bg-black/90 backdrop-blur-2xl"
-                onClick={() => setSelectedBallNum(null)}
-              />
-              <div className="relative w-full max-w-lg bg-[#020407] border border-white/10 rounded-[3rem] p-12 text-center">
-              <button
-                onClick={() => setSelectedBallNum(null)}
-                className="absolute top-8 right-8 text-white/20 hover:text-white"
-              >
-                ✕
-              </button>
-              <LotteryBall number={selectedBallNum} className="w-40 h-40 sm:w-56 sm:h-56 mx-auto mb-6" />
-              {selectedBall && (() => {
-                const weeks = weeksCoveredFor(selectedBall);
-                const isPaid = weeks > 0;
-                const winsHere = winnerRows.filter((r: any) => Number(r.winning_number) === selectedBallNum && r.winner_name);
-                return (
-                  <div className="space-y-4 text-white">
-                    <p className="text-2xl font-black tracking-tighter">
-                      {selectedBall.owner ?? `Vacant Ball #${selectedBallNum}`}
-                    </p>
-                    <div className={`inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full ${isPaid ? 'bg-green-500/10 text-green-400 border border-green-500/30' : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
-                      {isPaid
-                        ? `Covered · ${weeks} week${weeks === 1 ? '' : 's'} left`
-                        : selectedBall.owner ? 'Not covered' : 'Open for assignment'}
-                    </div>
-                    {isPaid && (
-                      <p className="text-xs text-white/50">Paid through {formatPaidUntil(selectedBall.paidUntil)}</p>
-                    )}
-                    {winsHere.length > 0 && (
-                      <div className="mt-6 pt-6 border-t border-white/10 text-left">
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-pink-400 mb-3">
-                          Win history · {winsHere.length} time{winsHere.length === 1 ? '' : 's'}
-                        </p>
-                        <ul className="space-y-1.5 text-xs">
-                          {winsHere.slice(0, 5).map((r: any) => (
-                            <li key={r.id} className="flex justify-between text-white/70">
-                              <span>{r.draw_date}</span>
-                              <span className="text-white/90">{r.winner_name} · £{r.amount_won}</span>
-                            </li>
+            <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
+              <div className="absolute inset-0 bg-black/40" onClick={() => { setSelectedBallNum(null); setPayBall(null); }} />
+              <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-t-3xl sm:rounded-3xl p-6 text-center space-y-3">
+                <div className="w-28 h-28 mx-auto">{renderBall(selectedBallNum, ballStatus(selectedBall), 'w-28 h-28 text-3xl')}</div>
+                {selectedBall && (() => {
+                  const weeks = weeksCoveredFor(selectedBall);
+                  const status = ballStatus(selectedBall);
+                  const winsHere = (winnerRows as any[]).filter((r) => Number(r.winning_number) === selectedBallNum && r.winner_name && (hasSeenLatestReveal || r.id !== (latestWin as any)?.id));
+                  return (
+                    <>
+                      <p className="text-2xl font-extrabold tracking-tight">{selectedBall.owner ?? `Ball ${selectedBallNum} is free`}</p>
+                      <span className={`inline-block rounded-full px-3 py-1 text-sm font-bold ${status === 'in' ? 'bg-green-100 text-green-800' : status === 'out' ? 'bg-red-100 text-red-700' : 'bg-[#e9ecf2] text-[#5a6270]'}`}>
+                        {status === 'in' ? `In. Paid up to ${shortDate(selectedBall.paidUntil)} (${weeks} draw${weeks === 1 ? '' : 's'})` : status === 'out' ? 'Not paid for Saturday' : 'Ask Carl if you want it'}
+                      </span>
+                      {winsHere.length > 0 && (
+                        <div className="pt-3 border-t border-[#e9ecf2] text-left">
+                          <p className={UI.label + ' mb-1.5'}>Won {winsHere.length} time{winsHere.length === 1 ? '' : 's'}</p>
+                          {winsHere.slice(0, 5).map((r) => (
+                            <p key={r.id} className="flex justify-between text-sm"><span className={UI.dim}>{drawDayLabel(r.draw_date)}</span><span className="font-bold">{r.winner_name}, £{r.amount_won}</span></p>
                           ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
+                        </div>
+                      )}
+                      {isAdmin && (
+                        <div className="pt-3 border-t border-[#e9ecf2] space-y-2">
+                          {selectedBall.owner ? (
+                            <div className="flex gap-2">
+                              <button className={(payBall === selectedBallNum ? UI.ghost : UI.btn) + ' flex-1 py-3'} onClick={() => openPay(selectedBallNum)}>{payBall === selectedBallNum ? 'Close payment' : 'Record payment'}</button>
+                              <button className={UI.ghost + ' flex-1 py-3'} onClick={() => openEditModal(selectedBallNum)}>Edit owner</button>
+                            </div>
+                          ) : (
+                            <button className={UI.btn + ' w-full py-3'} onClick={() => openAssignModal(selectedBallNum)}>Assign this ball</button>
+                          )}
+                          {payBall === selectedBallNum && renderPayPanel(selectedBall)}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+                <button className={`w-full py-2 text-sm font-bold ${UI.dim}`} onClick={() => { setSelectedBallNum(null); setPayBall(null); }}>Close</button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
           {/* INBOX */}
           {showInbox && (
-            <div className="fixed inset-0 z-[200] flex flex-col bg-[#020407]">
-              <header className="p-6 sm:p-8 flex items-center justify-between border-b border-white/10 gap-3">
-                <h3 className="text-2xl sm:text-3xl font-black text-white uppercase">Notifications</h3>
-                <div className="flex items-center gap-3">
-                  {notifications.length > 0 && (
-                    <button
-                      onClick={clearAllNotifications}
-                      className="text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-red-400"
-                    >
-                      Clear all
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setShowInbox(false)}
-                    className="text-white/40 hover:text-white text-xl"
-                  >
-                    ✕
-                  </button>
+            <div className="fixed inset-0 z-[200] bg-[#f1f3f7] overflow-y-auto">
+              <div className="max-w-lg mx-auto p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="flex-1 text-2xl font-extrabold tracking-tight">Notifications</h3>
+                  {notifications.length > 0 && <button className={UI.ghost + ' bg-white'} onClick={clearAllNotifications}>Clear all</button>}
+                  <button className={UI.ghost + ' bg-white'} onClick={() => setShowInbox(false)}>Close</button>
                 </div>
-              </header>
-
-              <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-3">
                 {notifications.length === 0 ? (
-                  <div className="text-center py-12 text-white/40">
-                    <p className="font-black uppercase tracking-widest mb-2 text-xs">No alerts</p>
-                    <p className="text-xs text-white/30">In-app notifications from admin will appear here.</p>
-                  </div>
-                ) : (
-                  notifications.map((n) => (
-                    <div key={n.id} className="bg-white/5 border border-white/10 p-5 rounded-2xl relative group">
-                      <button
-                        onClick={() => dismissNotification(n.id)}
-                        aria-label="Dismiss"
-                        className="absolute top-3 right-3 w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white text-sm flex items-center justify-center opacity-60 group-hover:opacity-100 transition-opacity"
-                      >
-                        ✕
-                      </button>
-                      <div className="pr-8">
-                        <div className="flex items-baseline justify-between gap-2 mb-1">
-                          <h5 className="font-black text-white">{n.title}</h5>
-                          <span className="text-[10px] font-bold uppercase text-white/30 flex-shrink-0">{n.timestamp}</span>
-                        </div>
-                        <p className="text-white/60 text-sm">{n.body}</p>
-                      </div>
+                  <p className={`text-center py-12 ${UI.dim}`}>Nothing here yet.</p>
+                ) : notifications.map((n) => (
+                  <div key={n.id} className={UI.card + ' flex items-start gap-3'}>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-extrabold">{n.title}</p>
+                      <p className={`text-sm ${UI.dim}`}>{n.body}</p>
+                      <p className={`text-xs mt-1 ${UI.dim}`}>{n.timestamp}</p>
                     </div>
-                  ))
-                )}
+                    <button aria-label="Dismiss" className={`w-8 h-8 rounded-full bg-[#e9ecf2] ${UI.dim}`} onClick={() => dismissNotification(n.id)}>✕</button>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
           {/* RECOVERY MODAL (blocking) */}
           {isRecoveryMode && (
-            <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-black/90 backdrop-blur-2xl">
-              <div className="w-full max-w-md bg-[#0b0f16] border border-pink-500/40 rounded-[2rem] p-8 text-center shadow-2xl">
-                <h3 className="text-2xl font-black text-white mb-3">Set a New Password</h3>
-                <p className="text-white/60 text-sm mb-6">For security, please choose a new password before continuing.</p>
-                <form onSubmit={handleRecoveryPasswordSubmit} className="space-y-4">
-                  <input
-                    type="password"
-                    required
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-pink-500"
-                    placeholder="New password"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!newPassword || isUpdatingPassword}
-                    className="w-full py-4 bg-pink-500 text-black font-black uppercase tracking-widest text-xs rounded-xl disabled:opacity-40"
-                  >
-                    {isUpdatingPassword ? 'Updating...' : 'Update Password'}
-                  </button>
+            <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-black/50">
+              <div className="w-full max-w-md bg-white rounded-3xl p-6 text-center space-y-3">
+                <h3 className="text-2xl font-extrabold">Set a new password</h3>
+                <p className={`text-sm ${UI.dim}`}>Choose a new password before you carry on.</p>
+                <form onSubmit={handleRecoveryPasswordSubmit} className="space-y-3">
+                  <input type="password" required aria-label="New password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={UI.input} placeholder="New password" />
+                  <button type="submit" disabled={!newPassword || isUpdatingPassword} className={UI.btn + ' w-full py-3.5'}>{isUpdatingPassword ? 'Updating…' : 'Update password'}</button>
                 </form>
               </div>
             </div>
           )}
         </>
       ) : (
-  /* Login / Register */
-  <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6">
-    {/* Logo / Title */}
-    <div className="relative z-10 text-center mb-12">
-      <div className="w-16 h-16 rounded-full bg-pink-500 mx-auto flex items-center justify-center text-black font-black text-sm mb-6 shadow-2xl animate-bounce">
-        DWA
-      </div>
-      <h1 className="text-7xl font-black text-white tracking-tighter uppercase leading-none">
-        Bonus
-        <br />
-        <span className="text-pink-500">Ball</span>
-      </h1>
-      <p className="text-[10px] font-black uppercase tracking-[0.5em] text-white/20 mt-4">
-        In Memory of Emmie-Rose
-      </p>
+        /* ============================ SIGN IN ============================ */
+        <main className="min-h-screen max-w-lg mx-auto flex flex-col">
+          <div className="relative overflow-hidden rounded-b-[2rem] bg-[#1f6fd0] text-white px-6 pt-14 pb-10">
+            <div className="login-ball" style={{ left: '8%', top: '18%', width: 64, animationDelay: '0s' }}><LotteryBall number={7} hideShadow className="w-full" /></div>
+            <div className="login-ball" style={{ right: '10%', top: '10%', width: 84, animationDelay: '-3s' }}><LotteryBall number={24} hideShadow className="w-full" /></div>
+            <div className="login-ball" style={{ right: '24%', bottom: '8%', width: 56, animationDelay: '-6s' }}><LotteryBall number={42} hideShadow className="w-full" /></div>
+            <h1 className="relative text-6xl font-extrabold tracking-tighter leading-none">Bonus<br />Ball</h1>
+            <p className="relative font-semibold mt-3 opacity-90">Every Saturday, 8pm.</p>
+          </div>
+
+          <div className="px-4 py-5">
+            <div className={UI.card + ' space-y-4'}>
+              {authMode === 'login' && (
+                <form onSubmit={handleLogin} className="space-y-3">
+                  <div><label htmlFor="login-email" className={UI.label}>Email</label><input id="login-email" name="email" required type="email" autoComplete="email" className={UI.input + ' mt-1'} /></div>
+                  <div><label htmlFor="login-password" className={UI.label}>Password</label><input id="login-password" name="password" required type="password" autoComplete="current-password" className={UI.input + ' mt-1'} /></div>
+                  <button type="submit" className={UI.btn + ' w-full py-3.5 text-base'}>Sign in</button>
+                  <div className="flex justify-between text-sm font-bold">
+                    <button type="button" onClick={() => setAuthMode('register')} className="underline underline-offset-4">Create an account</button>
+                    <button type="button" onClick={() => setAuthMode('forgot')} className={UI.dim}>Forgot password?</button>
+                  </div>
+                </form>
+              )}
+
+              {authMode === 'register' && (
+                <form onSubmit={handleRegister} className="space-y-3">
+                  <div><label htmlFor="reg-name" className={UI.label}>Your name</label><input id="reg-name" name="fullName" required type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} className={UI.input + ' mt-1'} /></div>
+                  <div><label htmlFor="reg-email" className={UI.label}>Email</label><input id="reg-email" name="email" required type="email" autoComplete="email" className={UI.input + ' mt-1'} /></div>
+                  <div><label htmlFor="reg-password" className={UI.label}>Password</label><input id="reg-password" name="password" required type="password" autoComplete="new-password" className={UI.input + ' mt-1'} /></div>
+                  <button type="submit" className={UI.btn + ' w-full py-3.5 text-base'}>Create account</button>
+                  <button type="button" onClick={() => setAuthMode('login')} className={`w-full text-sm font-bold ${UI.dim}`}>I already have an account</button>
+                </form>
+              )}
+
+              {authMode === 'forgot' && (
+                <form onSubmit={handleForgotPassword} className="space-y-3">
+                  <div><label htmlFor="forgot-email" className={UI.label}>Email</label><input id="forgot-email" name="email" required type="email" autoComplete="email" className={UI.input + ' mt-1'} /></div>
+                  <button type="submit" className={UI.btn + ' w-full py-3.5 text-base'}>Send reset email</button>
+                  <button type="button" onClick={() => setAuthMode('login')} className={`w-full text-sm font-bold ${UI.dim}`}>Back to sign in</button>
+                </form>
+              )}
+
+              {authMode === 'reset' && (
+                <form onSubmit={handleResetPassword} className="space-y-3">
+                  <div><label htmlFor="reset-password" className={UI.label}>New password</label><input id="reset-password" name="password" required type="password" autoComplete="new-password" className={UI.input + ' mt-1'} /></div>
+                  <button type="submit" className={UI.btn + ' w-full py-3.5 text-base'}>Set new password</button>
+                </form>
+              )}
+            </div>
+          </div>
+        </main>
+      )}
     </div>
-
-   <div className="w-full max-w-md bg-white/[0.03] backdrop-blur-3xl border border-white/10 p-10 rounded-[3rem] shadow-2xl relative z-10 animate-in fade-in slide-in-from-bottom-10 duration-700">
-  {/* LOGIN */}
-  {authMode === "login" && (
-    <form onSubmit={handleLogin} className="space-y-6">
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Email
-        </label>
-        <input
-          name="email"
-          required
-          type="email"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Password
-        </label>
-        <input
-          name="password"
-          required
-          type="password"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
-      </div>
-
-      <button
-        type="submit"
-        className="w-full py-5 bg-white text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-500 hover:text-white transition-all"
-      >
-        Enter Platform
-      </button>
-
-      <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-white/30">
-        <button type="button" onClick={() => setAuthMode("register")} className="hover:text-white">
-          Register
-        </button>
-        <button type="button" onClick={() => setAuthMode("forgot")} className="hover:text-white">
-          Forgot password?
-        </button>
-      </div>
-    </form>
-  )}
-
-  {/* REGISTER */}
-  {authMode === "register" && (
-    <form onSubmit={handleRegister} className="space-y-6">
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Full Name
-        </label>
-        <input
-          name="fullName"
-          required
-          type="text"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-          placeholder="Your name"
-        />
-      </div>
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Email
-        </label>
-        <input
-          name="email"
-          required
-          type="email"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Password
-        </label>
-        <input
-          name="password"
-          required
-          type="password"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
-      </div>
-
-      <button
-        type="submit"
-        className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-400 transition-all"
-      >
-        Create Account
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setAuthMode("login")}
-        className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all"
-      >
-        Already have an account?
-      </button>
-    </form>
-  )}
-
-  {/* FORGOT PASSWORD */}
-  {authMode === "forgot" && (
-    <form onSubmit={handleForgotPassword} className="space-y-6">
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          Email
-        </label>
-        <input
-          name="email"
-          required
-          type="email"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
-      </div>
-
-      <button
-        type="submit"
-        className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-400 transition-all"
-      >
-        Send reset email
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setAuthMode("login")}
-        className="w-full text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white transition-all"
-      >
-        Back to login
-      </button>
-    </form>
-  )}
-
-{/* RESET PASSWORD */}
-{authMode === "reset" && (
-  <form onSubmit={handleResetPassword} className="space-y-6">
-    <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-2">
-          New Password
-        </label>
-        <input
-          name="password"
-          required
-          type="password"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white outline-none focus:border-pink-500 transition-all"
-        />
-      </div>
-
-      <button
-        type="submit"
-      className="w-full py-5 bg-pink-500 text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-pink-400 transition-all"
-  >
-    Set new password
-  </button>
-</form>
-)}
-    </div>
-  </main>
-    )}
-  </div>
   );
 };
 
